@@ -1,0 +1,277 @@
+import {
+  Injectable,
+  NotFoundException,
+  UnprocessableEntityException,
+} from '@nestjs/common';
+import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
+import { DataSource, EntityManager, In, Repository } from 'typeorm';
+import { PaginatedDto, paginate } from '../../common/dto/paginated.dto';
+import { ProductVariant } from '../product-variants/entities/product-variant.entity';
+import { computeCheckoutTotals, formatInvoiceNumber } from './checkout-totals';
+import { CheckoutItemFailureDto } from './dto/checkout-failure.dto';
+import { CheckoutDto } from './dto/checkout.dto';
+import { ListSalesQueryDto } from './dto/list-sales-query.dto';
+import { SaleItem } from './entities/sale-item.entity';
+import { Sale } from './entities/sale.entity';
+
+const DEFAULT_PAYMENT_METHOD = 'cash';
+const BARE_DATE = /^\d{4}-\d{2}-\d{2}$/;
+
+interface InvoiceSequenceRow {
+  day_key: string;
+  last_value: number | string;
+}
+
+@Injectable()
+export class SalesService {
+  constructor(
+    @InjectDataSource() private readonly dataSource: DataSource,
+    @InjectRepository(Sale) private readonly salesRepository: Repository<Sale>,
+  ) {}
+
+  /**
+   * Direct POS checkout. All or nothing: if any line is unsellable, nothing is
+   * written and no stock moves. Stock is deducted with a conditional UPDATE so
+   * two simultaneous checkouts can never oversell the same variant.
+   */
+  async checkout(dto: CheckoutDto, userId: number): Promise<Sale> {
+    const duplicates = findDuplicateVariants(dto.items);
+    if (duplicates.length > 0) {
+      throw rejectCheckout(duplicates);
+    }
+
+    const saleId = await this.dataSource.transaction(async (manager) => {
+      const variants = await manager.find(ProductVariant, {
+        where: { id: In(dto.items.map((item) => item.variant_id)) },
+        relations: { product: true },
+      });
+      const variantsById = new Map(variants.map((v) => [v.id, v]));
+
+      const failures: CheckoutItemFailureDto[] = [];
+      for (const item of dto.items) {
+        const variant = variantsById.get(item.variant_id);
+        if (variant === undefined) {
+          failures.push({
+            variant_id: item.variant_id,
+            reason: 'not_found',
+            message: 'No product variant with this id.',
+            requested_quantity: item.quantity,
+          });
+          continue;
+        }
+        // Checked before price and stock: a withdrawn SKU isn't sellable at any
+        // price, so "no price set" would be misleading advice here.
+        if (!variant.isActive) {
+          failures.push({
+            variant_id: item.variant_id,
+            reason: 'inactive',
+            message:
+              'This item has been withdrawn from the catalogue and cannot be sold.',
+            requested_quantity: item.quantity,
+          });
+          continue;
+        }
+        if (variant.price === null) {
+          failures.push({
+            variant_id: item.variant_id,
+            reason: 'not_priced',
+            message: 'This item has no price set yet and cannot be sold.',
+            requested_quantity: item.quantity,
+          });
+          continue;
+        }
+        const available = variant.stockQuantity ?? 0;
+        if (available < item.quantity) {
+          failures.push({
+            variant_id: item.variant_id,
+            reason: 'insufficient_stock',
+            message: `Only ${available} in stock, ${item.quantity} requested.`,
+            requested_quantity: item.quantity,
+            available_quantity: available,
+          });
+        }
+      }
+      if (failures.length > 0) {
+        throw rejectCheckout(failures);
+      }
+
+      // Deduct in a stable id order so two concurrent checkouts touching the
+      // same variants take row locks in the same sequence and can't deadlock.
+      const ordered = [...dto.items].sort(
+        (a, b) => a.variant_id - b.variant_id,
+      );
+      for (const item of ordered) {
+        const result = await manager
+          .createQueryBuilder()
+          .update(ProductVariant)
+          .set({ stockQuantity: () => 'stock_quantity - :decrement' })
+          .setParameter('decrement', item.quantity)
+          .where('id = :id', { id: item.variant_id })
+          .andWhere('stock_quantity >= :required', { required: item.quantity })
+          // Re-checked here, not just in the loop above, so a withdrawal that
+          // lands mid-checkout is caught by the same conditional update that
+          // catches a concurrent sale.
+          .andWhere('is_active = true')
+          .execute();
+
+        // Zero rows means someone else bought it, or it was withdrawn, between
+        // the check above and now. Roll the whole thing back rather than
+        // partially selling.
+        if (result.affected !== 1) {
+          throw rejectCheckout([
+            {
+              variant_id: item.variant_id,
+              reason: 'stock_changed',
+              message:
+                'This item changed while checking out. Nothing was sold — please retry.',
+              requested_quantity: item.quantity,
+            },
+          ]);
+        }
+      }
+
+      const totals = computeCheckoutTotals(
+        dto.items.map((item) => ({
+          // Non-null: the price check above already rejected unpriced variants.
+          unitPrice: variantsById.get(item.variant_id)!.price!,
+          quantity: item.quantity,
+        })),
+        dto.discount,
+      );
+
+      const sale = manager.create(Sale, {
+        invoiceNumber: await this.nextInvoiceNumber(manager),
+        subtotal: totals.subtotal,
+        discountType: dto.discount?.type ?? null,
+        discountValue: dto.discount?.value ?? null,
+        discountAmount: totals.discountAmount,
+        totalAmount: totals.totalAmount,
+        paymentMethod: dto.payment_method ?? DEFAULT_PAYMENT_METHOD,
+        createdById: userId,
+        items: dto.items.map((item, index) => {
+          const variant = variantsById.get(item.variant_id)!;
+          return manager.create(SaleItem, {
+            productVariantId: variant.id,
+            // Snapshots: a later catalogue edit must not rewrite this invoice.
+            brandNameSnapshot: variant.product.brandName,
+            dosageFormSnapshot: variant.dosageForm,
+            strengthSnapshot: variant.strength,
+            unitPrice: variant.price!,
+            quantity: item.quantity,
+            lineTotal: totals.lineTotals[index],
+          });
+        }),
+      });
+
+      const saved = await manager.save(sale);
+      return saved.id;
+    });
+
+    return this.findOne(saleId);
+  }
+
+  async findAll(query: ListSalesQueryDto): Promise<PaginatedDto<Sale>> {
+    const qb = this.baseQuery();
+
+    if (query.search !== undefined) {
+      qb.andWhere('sale.invoiceNumber ILIKE :search', {
+        search: `%${query.search}%`,
+      });
+    }
+    if (query.from !== undefined) {
+      qb.andWhere('sale.createdAt >= :from', { from: new Date(query.from) });
+    }
+    if (query.to !== undefined) {
+      // A bare `2026-08-17` means the whole day, so compare against the start
+      // of the next day rather than midnight, which would exclude everything.
+      if (BARE_DATE.test(query.to)) {
+        const dayAfter = new Date(`${query.to}T00:00:00.000Z`);
+        dayAfter.setUTCDate(dayAfter.getUTCDate() + 1);
+        qb.andWhere('sale.createdAt < :to', { to: dayAfter });
+      } else {
+        qb.andWhere('sale.createdAt <= :to', { to: new Date(query.to) });
+      }
+    }
+
+    qb.orderBy('sale.createdAt', 'DESC')
+      .addOrderBy('sale.id', 'DESC')
+      .skip(query.skip)
+      .take(query.limit);
+
+    const [data, total] = await qb.getManyAndCount();
+    return paginate(data, total, query.page, query.limit);
+  }
+
+  async findOne(id: number): Promise<Sale> {
+    const sale = await this.baseQuery()
+      .leftJoinAndSelect('sale.items', 'item')
+      .where('sale.id = :id', { id })
+      .orderBy('item.id', 'ASC')
+      .getOne();
+
+    if (!sale) {
+      throw new NotFoundException(`Sale ${id} not found`);
+    }
+    return sale;
+  }
+
+  /**
+   * Atomic per-day counter. The `ON CONFLICT DO UPDATE` takes a row lock, so
+   * concurrent checkouts serialise here and each gets a distinct sequence.
+   */
+  private async nextInvoiceNumber(manager: EntityManager): Promise<string> {
+    // Typed binding rather than an `as` cast: query() returns `any`, and an
+    // assertion would be stripped as "unnecessary", losing the types silently.
+    // An INSERT ... RETURNING resolves to the rows array (an UPDATE would
+    // instead resolve to a [rows, rowCount] tuple).
+    const rows: InvoiceSequenceRow[] = await manager.query(
+      `INSERT INTO invoice_sequences ("day", "last_value")
+       VALUES (CURRENT_DATE, 1)
+       ON CONFLICT ("day") DO UPDATE
+         SET "last_value" = invoice_sequences."last_value" + 1
+       RETURNING to_char("day", 'YYYYMMDD') AS day_key, "last_value"`,
+    );
+
+    const row = rows[0];
+    // `last_value` arrives as a string on some pg type configurations.
+    return formatInvoiceNumber(row.day_key, Number(row.last_value));
+  }
+
+  /** Joins the processing admin without ever selecting their password hash. */
+  private baseQuery() {
+    return this.salesRepository
+      .createQueryBuilder('sale')
+      .leftJoin('sale.createdBy', 'cashier')
+      .addSelect(['cashier.id', 'cashier.email', 'cashier.role']);
+  }
+}
+
+function findDuplicateVariants(
+  items: { variant_id: number; quantity: number }[],
+): CheckoutItemFailureDto[] {
+  const seen = new Set<number>();
+  const duplicated = new Set<number>();
+  for (const item of items) {
+    if (seen.has(item.variant_id)) {
+      duplicated.add(item.variant_id);
+    }
+    seen.add(item.variant_id);
+  }
+
+  return [...duplicated].map((variantId) => ({
+    variant_id: variantId,
+    reason: 'duplicate_item' as const,
+    message:
+      'This variant appears more than once. Combine it into a single line with the total quantity.',
+  }));
+}
+
+function rejectCheckout(
+  errors: CheckoutItemFailureDto[],
+): UnprocessableEntityException {
+  return new UnprocessableEntityException({
+    message:
+      'Checkout rejected: no stock was deducted and no sale was recorded.',
+    errors,
+  });
+}
