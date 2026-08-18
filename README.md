@@ -11,6 +11,98 @@ Three things drive the design:
 A single admin account (seeded, no registration endpoint) guards the write
 operations; browsing and searching are public.
 
+## Features
+
+| # | Feature | Module | Endpoints |
+| --- | --- | --- | --- |
+| 1 | Admin login with JWT (seeded account, no public registration) | `auth` | `POST /auth/login`, `GET /auth/me` |
+| 2 | Bulk catalogue import from `medicine.csv` — idempotent, transactional | `import` | `POST /import/csv` + `npm run import:csv` |
+| 3 | Reference data for filter dropdowns | `manufacturers`, `generics` | `GET /manufacturers`, `GET /generics` |
+| 4 | Alternative-brand lookup — every brand built on one active ingredient | `generics` | `GET /generics/:id/variants` |
+| 5 | Browse brand lines with their SKU count | `products` | `GET /products`, `GET /products/:id` |
+| 6 | SKU search with filters + the **pricing worklist** | `product-variants` | `GET /variants`, `GET /variants/:id` |
+| 7 | Price & stock entry (independent of each other) | `product-variants` | `PATCH /variants/:id/pricing` |
+| 8 | Withdraw / restore a SKU (soft delete, never hard) | `product-variants` | `DELETE /variants/:id`, `POST /variants/:id/restore` |
+| 9 | POS checkout — all-or-nothing, race-safe stock deduction | `sales` | `POST /sales/checkout` |
+| 10 | Sales history & receipt lookup | `sales` | `GET /sales`, `GET /sales/:id` |
+| 11 | Auto-numbered PDF invoice (`INV-YYYYMMDD-NNNN`) | `sales` | `GET /sales/:id/invoice/pdf` |
+| 12 | Low-stock alerts, computed live | `dashboard` | `GET /dashboard/low-stock` |
+| 13 | Sales summary by preset or custom period | `dashboard` | `GET /dashboard/summary` |
+| 14 | Swagger/OpenAPI docs for every route | — | `GET /api/docs` |
+
+Cross-cutting: Joi-validated env at boot, global `ValidationPipe`
+(`whitelist` + `forbidNonWhitelisted`, so an unknown query param is a `400`),
+uniform pagination envelope, migration-owned schema, and CORS enabled.
+
+## Workflow
+
+The system runs in four stages. Each stage names the endpoint that drives it.
+
+### Stage 1 — Load the catalogue (one time, then whenever the source file changes)
+
+```text
+medicine.csv ──▶ npm run import:csv ──▶ manufacturers + generics + products + product_variants
+                 (or POST /import/csv)     price = NULL, stock_quantity = NULL
+```
+
+21,714 CSV rows become 232 manufacturers, 1,661 generics, 14,013 products and
+21,714 variants. **Price and stock are deliberately left `NULL`** — the source
+file's prices are unusable (see [Import](#import)). The whole load is one
+transaction and re-running it never overwrites pricing work.
+
+### Stage 2 — Admin prices the catalogue (the daily back-office loop)
+
+```text
+POST /auth/login                          → JWT
+GET  /variants?pricing_status=missing     → the worklist: SKUs with no price yet
+GET  /variants/:id                        → inspect one SKU
+PATCH /variants/:id/pricing               → set price and/or stock
+DELETE /variants/:id                      → withdraw a SKU the shop won't carry
+POST  /variants/:id/restore               → undo that
+```
+
+The worklist shrinks as the admin works: setting a price moves the SKU out of
+`pricing_status=missing` and into `pricing_status=set`, where it becomes
+sellable. `GET /variants` narrows the queue by `manufacturer_id`, `generic_id`,
+`dosage_form`, `type` and free-text `search`, so the admin can price one
+company's shelf at a time.
+
+### Stage 3 — Sell at the counter (POS)
+
+```text
+GET  /variants?search=napa        → find the item (or GET /generics/:id/variants for an alternative brand)
+POST /sales/checkout              → submit the whole basket in one request
+        ├─ ✅ 201 → stock deducted, sale + line items written, invoice number issued
+        └─ ❌ 422 → nothing written, per-line reasons returned
+GET  /sales/:id/invoice/pdf       → hand the customer the invoice
+```
+
+There is no cart resource and no server-side session — the client holds the
+basket and posts it once. Validation, stock deduction and the sale record all
+happen inside a single transaction, so a rejected line leaves the database
+exactly as it was. See [Checkout](#checkout).
+
+### Stage 4 — Monitor and restock
+
+```text
+GET /dashboard/low-stock                       → what to reorder, lowest stock first
+     └─▶ PATCH /variants/:id/pricing {"stock_quantity": 300}   ← back to Stage 2
+GET /dashboard/summary?period=this_week        → earnings, units, transactions
+GET /sales?search=INV-20260817&from=&to=       → find a past sale, re-download its PDF
+```
+
+Restocking closes the loop: the low-stock widget links straight back to the same
+pricing endpoint Stage 2 uses.
+
+### Who can call what
+
+Browsing is public; anything that writes, or that exposes money, needs the admin
+JWT as `Authorization: Bearer <token>`.
+
+| Public | Admin only (Bearer) |
+| --- | --- |
+| `/manufacturers`, `/generics`, `/generics/:id/variants`, `/products`, `/products/:id`, `/variants`, `/variants/:id` | `/auth/me`, `/variants/:id/pricing`, `/variants/:id` (DELETE), `/variants/:id/restore`, `/import/csv`, all of `/sales`, all of `/dashboard` |
+
 ## Requirements
 
 - Node.js 22+
@@ -117,30 +209,35 @@ file, so the result does not depend on row order and re-imports are stable.
 
 ## API
 
-| Method | Route | Auth | Description |
-| --- | --- | --- | --- |
-| `POST` | `/auth/login` | — | Exchanges email + password for a JWT |
-| `GET` | `/auth/me` | Bearer | Returns the token holder's `id`, `email`, `role` |
-| `GET` | `/manufacturers` | — | List/search companies (`search`) |
-| `GET` | `/generics` | — | List/search generics (`search`) |
-| `GET` | `/generics/:id/variants` | — | Alternative brands sharing this generic |
-| `GET` | `/products` | — | Browse brand lines, each with `variantCount` |
-| `GET` | `/products/:id` | — | One product with all variants nested |
-| `GET` | `/variants` | — | The main admin search (see filters below) |
-| `GET` | `/variants/:id` | — | One SKU with product, manufacturer, generic |
-| `PATCH` | `/variants/:id/pricing` | **Bearer** | Sets price and/or stock; either alone is fine |
-| `DELETE` | `/variants/:id` | **Bearer** | Withdraws a SKU (soft delete) |
-| `POST` | `/variants/:id/restore` | **Bearer** | Puts a withdrawn SKU back |
-| `POST` | `/import/csv` | **Bearer** | Imports a CSV upload |
-| `POST` | `/sales/checkout` | **Bearer** | Direct POS checkout of a whole basket |
-| `GET` | `/sales` | **Bearer** | List/search past sales (`search`, `from`, `to`) |
-| `GET` | `/sales/:id` | **Bearer** | Full sale with items and discount breakdown |
-| `GET` | `/sales/:id/invoice/pdf` | **Bearer** | Downloads the invoice PDF |
-| `GET` | `/dashboard/low-stock` | **Bearer** | Variants needing restock, lowest first |
-| `GET` | `/dashboard/summary` | **Bearer** | Earnings and volume for a period |
+Every route is documented and callable in Swagger UI at `/api/docs`. Protected
+routes take `Authorization: Bearer <token>` from `POST /auth/login`.
+
+| Method | Route | Auth | Query / body | Description |
+| --- | --- | --- | --- | --- |
+| `POST` | `/auth/login` | — | `{ email, password }` | Exchanges email + password for a JWT |
+| `GET` | `/auth/me` | **Bearer** | — | Returns the token holder's `id`, `email`, `role` |
+| `GET` | `/manufacturers` | — | `search`, `page`, `limit` | List/search companies |
+| `GET` | `/generics` | — | `search`, `page`, `limit` | List/search generics |
+| `GET` | `/generics/:id/variants` | — | `page`, `limit` | Alternative brands sharing this generic |
+| `GET` | `/products` | — | `search`, `manufacturer_id`, `type`, `page`, `limit` | Browse brand lines, each with `variantCount` |
+| `GET` | `/products/:id` | — | — | One product with all variants nested |
+| `GET` | `/variants` | — | see filters below | The main admin search |
+| `GET` | `/variants/:id` | — | — | One SKU with product, manufacturer, generic |
+| `PATCH` | `/variants/:id/pricing` | **Bearer** | `{ price?, stock_quantity? }` | Sets price and/or stock; either alone is fine |
+| `DELETE` | `/variants/:id` | **Bearer** | — | Withdraws a SKU (soft delete) |
+| `POST` | `/variants/:id/restore` | **Bearer** | — | Puts a withdrawn SKU back |
+| `POST` | `/import/csv` | **Bearer** | `multipart/form-data`, field `file` | Imports a CSV upload (max 25 MB) |
+| `POST` | `/sales/checkout` | **Bearer** | `{ items[], discount?, payment_method? }` | Direct POS checkout of a whole basket |
+| `GET` | `/sales` | **Bearer** | `search`, `from`, `to`, `page`, `limit` | List/search past sales |
+| `GET` | `/sales/:id` | **Bearer** | — | Full sale with items and discount breakdown |
+| `GET` | `/sales/:id/invoice/pdf` | **Bearer** | — | Downloads the invoice PDF |
+| `GET` | `/dashboard/low-stock` | **Bearer** | — | Variants needing restock, lowest first |
+| `GET` | `/dashboard/summary` | **Bearer** | `period` or `from`+`to` | Earnings and volume for a period |
 
 `GET /variants` filters: `search` (brand or generic name), `manufacturer_id`,
-`generic_id`, `dosage_form`, `type`, `pricing_status`, `status`, `page`, `limit`.
+`generic_id`, `dosage_form`, `type` (`allopathic` | `herbal`), `pricing_status`
+(`missing` | `set`), `status` (`active` | `inactive` | `all`), `page`, `limit`.
+Unknown query params are rejected with a `400` rather than silently ignored.
 
 **The pricing worklist** is `pricing_status=missing`, which selects variants with
 no price yet — backed by the `idx_variants_price_null` partial index:
