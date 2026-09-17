@@ -11,6 +11,7 @@ import {
 } from '@nestjs/common';
 import {
   ApiBearerAuth,
+  ApiConflictResponse,
   ApiCreatedResponse,
   ApiNotFoundResponse,
   ApiOkResponse,
@@ -31,8 +32,11 @@ import type { AuthenticatedUser } from '../../common/types/authenticated-user';
 import { CheckoutRejectedDto } from './dto/checkout-failure.dto';
 import { CheckoutDto } from './dto/checkout.dto';
 import { ListSalesQueryDto } from './dto/list-sales-query.dto';
+import { CreateReturnDto, VoidSaleDto } from './dto/return.dto';
+import { SaleReturn } from './entities/sale-return.entity';
 import { Sale } from './entities/sale.entity';
 import { InvoicePdfService } from './invoice-pdf.service';
+import { ReturnsService } from './returns.service';
 import { SalesService } from './sales.service';
 
 @ApiTags('sales')
@@ -43,7 +47,59 @@ export class SalesController {
   constructor(
     private readonly salesService: SalesService,
     private readonly invoicePdfService: InvoicePdfService,
+    private readonly returnsService: ReturnsService,
   ) {}
+
+  @Post(':id/void')
+  @ApiOperation({
+    summary: 'Void a sale made today',
+    description:
+      'Reverses the whole sale: every unit goes back into the batch it came ' +
+      'from and the sale is marked voided (the invoice number is kept). Only ' +
+      'allowed on the day of sale and before any return.',
+  })
+  @ApiOkResponse({ type: Sale })
+  @ApiConflictResponse({
+    description: '`void_window_closed` (not today) or `not_voidable` (already voided/returned).',
+  })
+  @ApiNotFoundResponse({ description: 'No sale with that id.' })
+  async voidSale(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: VoidSaleDto,
+    @CurrentUser() user: AuthenticatedUser,
+  ): Promise<Sale> {
+    await this.returnsService.voidSale(id, dto, user.id);
+    return this.salesService.findOne(id);
+  }
+
+  @Post(':id/returns')
+  @ApiOperation({
+    summary: 'Take items back from a sale',
+    description:
+      'Refunds each returned unit at its price less its share of the sale ' +
+      'discount, and restocks it into the original batch unless `restock` is false.',
+  })
+  @ApiCreatedResponse({ type: Sale })
+  @ApiUnprocessableEntityResponse({
+    description: 'A line is not on this sale, or asks for more than is left to return.',
+  })
+  @ApiConflictResponse({ description: 'The sale is voided or fully returned.' })
+  @ApiNotFoundResponse({ description: 'No sale with that id.' })
+  async createReturn(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: CreateReturnDto,
+    @CurrentUser() user: AuthenticatedUser,
+  ): Promise<Sale> {
+    await this.returnsService.createReturn(id, dto, user.id);
+    return this.salesService.findOne(id);
+  }
+
+  @Get(':id/returns')
+  @ApiOperation({ summary: 'Returns recorded against a sale' })
+  @ApiOkResponse({ type: SaleReturn, isArray: true })
+  listReturns(@Param('id', ParseIntPipe) id: number): Promise<SaleReturn[]> {
+    return this.returnsService.listForSale(id);
+  }
 
   @Post('checkout')
   @ApiOperation({

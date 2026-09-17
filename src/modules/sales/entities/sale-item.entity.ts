@@ -110,6 +110,10 @@ export class SaleItem {
   @Column({ type: 'integer' })
   quantity!: number;
 
+  @ApiProperty({ example: 0, description: 'How many of `quantity` have come back.' })
+  @Column({ name: 'returned_quantity', type: 'integer', default: 0 })
+  returnedQuantity!: number;
+
   @ApiProperty({ example: 100, description: 'unit_price * quantity.' })
   @Column({
     name: 'line_total',

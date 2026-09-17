@@ -30,6 +30,12 @@ export class DashboardSummaryDto {
   total_earning!: number;
 
   @ApiProperty({
+    example: 250,
+    description: 'Money given back on returns in the period. Already deducted from total_earning.',
+  })
+  total_refunds!: number;
+
+  @ApiProperty({
     example: 320,
     description: 'Total items sold — the sum of every sold line’s quantity.',
   })

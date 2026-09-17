@@ -237,6 +237,9 @@ export class SalesService {
         search: `%${query.search}%`,
       });
     }
+    if (query.status !== undefined && query.status !== 'all') {
+      qb.andWhere('sale.status = :status', { status: query.status });
+    }
     if (query.from !== undefined) {
       qb.andWhere('sale.createdAt >= :from', { from: new Date(query.from) });
     }
@@ -264,8 +267,13 @@ export class SalesService {
   async findOne(id: number): Promise<Sale> {
     const sale = await this.baseQuery()
       .leftJoinAndSelect('sale.items', 'item')
+      .leftJoinAndSelect('sale.returns', 'ret')
+      .leftJoinAndSelect('ret.items', 'retItem')
+      .leftJoin('sale.voidedBy', 'voider')
+      .addSelect(['voider.id', 'voider.email'])
       .where('sale.id = :id', { id })
       .orderBy('item.id', 'ASC')
+      .addOrderBy('ret.id', 'ASC')
       .getOne();
 
     if (!sale) {

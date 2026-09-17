@@ -14,6 +14,15 @@ import {
 import { numericTransformer } from '../../../common/transformers/numeric.transformer';
 import { User } from '../../auth/entities/user.entity';
 import { SaleItem } from './sale-item.entity';
+import { SaleReturn } from './sale-return.entity';
+
+export const SALE_STATUSES = [
+  'completed',
+  'voided',
+  'returned',
+  'partial_return',
+] as const;
+export type SaleStatus = (typeof SALE_STATUSES)[number];
 
 export const DISCOUNT_TYPES = ['flat', 'percentage'] as const;
 export type DiscountType = (typeof DISCOUNT_TYPES)[number];
@@ -25,6 +34,10 @@ export type PaymentMethod = (typeof PAYMENT_METHODS)[number];
 @Entity({ name: 'sales' })
 @Unique('uq_sales_invoice_number', ['invoiceNumber'])
 @Check('chk_sales_discount_type', `"discount_type" IN ('flat', 'percentage')`)
+@Check(
+  'chk_sales_status',
+  `"status" IN ('completed', 'voided', 'returned', 'partial_return')`,
+)
 export class Sale {
   @ApiProperty({ example: 42 })
   @PrimaryGeneratedColumn()
@@ -123,6 +136,30 @@ export class Sale {
   @ApiProperty({ type: () => SaleItem, isArray: true })
   @OneToMany(() => SaleItem, (item) => item.sale, { cascade: ['insert'] })
   items!: SaleItem[];
+
+  @ApiProperty({ enum: SALE_STATUSES, example: 'completed' })
+  @Index('idx_sales_status')
+  @Column({ type: 'varchar', length: 15, default: 'completed' })
+  status!: SaleStatus;
+
+  @ApiPropertyOptional({ nullable: true })
+  @Column({ name: 'voided_at', type: 'timestamptz', nullable: true })
+  voidedAt!: Date | null;
+
+  @Column({ name: 'voided_by', type: 'integer', nullable: true })
+  voidedById!: number | null;
+
+  @ManyToOne(() => User, { nullable: true })
+  @JoinColumn({ name: 'voided_by' })
+  voidedBy!: User | null;
+
+  @ApiPropertyOptional({ nullable: true })
+  @Column({ name: 'void_reason', type: 'varchar', length: 255, nullable: true })
+  voidReason!: string | null;
+
+  @ApiPropertyOptional({ type: () => SaleReturn, isArray: true })
+  @OneToMany(() => SaleReturn, (r) => r.sale)
+  returns?: SaleReturn[];
 
   @ApiProperty()
   // Backs the date-range filter on the sales list.

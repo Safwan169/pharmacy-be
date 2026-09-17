@@ -1,8 +1,22 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
-import { IsDateString, IsOptional, IsString, MaxLength } from 'class-validator';
+import {
+  IsDateString,
+  IsIn,
+  IsOptional,
+  IsString,
+  MaxLength,
+} from 'class-validator';
 import { PaginationQueryDto } from '../../../common/dto/pagination-query.dto';
 
 export class ListSalesQueryDto extends PaginationQueryDto {
+  @ApiPropertyOptional({
+    enum: ['completed', 'voided', 'returned', 'partial_return', 'all'],
+    default: 'all',
+  })
+  @IsIn(['completed', 'voided', 'returned', 'partial_return', 'all'])
+  @IsOptional()
+  status?: string;
+
   @ApiPropertyOptional({
     description: 'Case-insensitive substring match on the invoice number.',
     example: 'INV-20260817',

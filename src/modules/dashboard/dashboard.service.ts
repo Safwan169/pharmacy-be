@@ -30,12 +30,18 @@ const SUMMARY_SQL = `
     SELECT "id", "total_amount"
     FROM "sales"
     WHERE "created_at" >= $1 AND "created_at" < $2
+      AND "status" <> 'voided'
   ),
   sale_totals AS (
     SELECT
-      COALESCE(SUM("total_amount"), 0) AS total_earning,
+      COALESCE(SUM("total_amount"), 0) AS gross_earning,
       COUNT(*)                         AS total_transactions
     FROM window_sales
+  ),
+  refund_totals AS (
+    SELECT COALESCE(SUM("refund_amount"), 0) AS total_refunds
+    FROM "sale_returns"
+    WHERE "created_at" >= $1 AND "created_at" < $2
   ),
   item_totals AS (
     SELECT
@@ -44,7 +50,13 @@ const SUMMARY_SQL = `
     FROM "sale_items" si
     JOIN window_sales ws ON ws."id" = si."sale_id"
   )
-  SELECT * FROM sale_totals, item_totals
+  SELECT
+    sale_totals.gross_earning - refund_totals.total_refunds AS total_earning,
+    refund_totals.total_refunds,
+    sale_totals.total_transactions,
+    item_totals.total_units_sold,
+    item_totals.distinct_products_sold
+  FROM sale_totals, refund_totals, item_totals
 `;
 
 /** Base units in batches that can still be sold. Mirrors StockService.SELLABLE_BATCH_WHERE. */
@@ -57,6 +69,7 @@ const SELLABLE_STOCK_SQL = `(
 /** `pg` hands back NUMERIC and bigint COUNT columns as strings. */
 interface SummaryRow {
   total_earning: string;
+  total_refunds: string;
   total_transactions: string;
   total_units_sold: string;
   distinct_products_sold: string;
@@ -132,6 +145,7 @@ export class DashboardService {
       // Postgres sums NUMERIC exactly, so this is a single conversion off a
       // fixed 2-decimal string — no float drift to accumulate.
       total_earning: Number(row.total_earning),
+      total_refunds: Number(row.total_refunds),
       total_units_sold: Number(row.total_units_sold),
       total_transactions: Number(row.total_transactions),
       distinct_products_sold: Number(row.distinct_products_sold),

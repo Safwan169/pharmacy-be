@@ -91,6 +91,18 @@ export class InvoicePdfService {
     doc.fontSize(20).text('Pharmacy Management System', { align: 'center' });
     doc.moveDown(0.3);
     doc.fontSize(14).text('INVOICE', { align: 'center' });
+    if (sale.status === 'voided') {
+      doc.moveDown(0.3);
+      doc.fontSize(16).text('VOIDED', { align: 'center' });
+    } else if (sale.status === 'returned' || sale.status === 'partial_return') {
+      doc.moveDown(0.3);
+      doc
+        .fontSize(12)
+        .text(
+          sale.status === 'returned' ? 'FULLY RETURNED' : 'PARTIALLY RETURNED',
+          { align: 'center' },
+        );
+    }
     doc.moveDown(1);
 
     doc.fontSize(10);
