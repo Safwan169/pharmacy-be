@@ -57,6 +57,14 @@ export const validationSchema = Joi.object({
   // A variant counts as low stock below this number. Configurable so the
   // pharmacy can retune it without a code change; one global value for now.
   LOW_STOCK_THRESHOLD: Joi.number().integer().min(1).default(5),
+
+  // Backups: where pg_dump writes and how long dumps are kept. Optional —
+  // defaults to ./backups and 30 days. PG_DUMP_PATH/PG_RESTORE_PATH point at
+  // the binaries when they are not on PATH (typical on Windows).
+  BACKUP_DIR: Joi.string().optional(),
+  BACKUP_KEEP_DAYS: Joi.number().integer().min(1).default(30),
+  PG_DUMP_PATH: Joi.string().allow('').optional(),
+  PG_RESTORE_PATH: Joi.string().allow('').optional(),
 });
 
 export default (): AppConfiguration => ({

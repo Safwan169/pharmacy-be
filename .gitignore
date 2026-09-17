@@ -45,3 +45,6 @@ lerna-debug.log*
 
 # Temp
 *.tsbuildinfo
+
+# Database dumps
+/backups

@@ -14,6 +14,8 @@
     "start:prod": "node dist/main",
     "seed:admin": "ts-node -r tsconfig-paths/register src/database/seeds/admin-user.seed.ts",
     "import:csv": "ts-node -r tsconfig-paths/register src/database/seeds/import-medicines.seed.ts",
+    "backup": "ts-node -r tsconfig-paths/register src/database/seeds/backup.script.ts",
+    "restore": "ts-node -r tsconfig-paths/register src/database/seeds/backup.script.ts --restore",
     "typeorm": "typeorm-ts-node-commonjs -d src/database/data-source.ts",
     "migration:run": "npm run typeorm -- migration:run",
     "migration:revert": "npm run typeorm -- migration:revert",

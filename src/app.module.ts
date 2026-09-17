@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import configuration, { validationSchema } from './config/configuration';
 import { DatabaseModule } from './database/database.module';
+import { AdminModule } from './modules/admin/admin.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { CustomersModule } from './modules/customers/customers.module';
 import { DashboardModule } from './modules/dashboard/dashboard.module';
@@ -10,6 +11,7 @@ import { ImportModule } from './modules/import/import.module';
 import { ManufacturersModule } from './modules/manufacturers/manufacturers.module';
 import { ProductVariantsModule } from './modules/product-variants/product-variants.module';
 import { ProductsModule } from './modules/products/products.module';
+import { ReportsModule } from './modules/reports/reports.module';
 import { SalesModule } from './modules/sales/sales.module';
 import { SettingsModule } from './modules/settings/settings.module';
 import { StockModule } from './modules/stock/stock.module';
@@ -39,6 +41,8 @@ import { UsersModule } from './modules/users/users.module';
     SalesModule,
     CustomersModule,
     DashboardModule,
+    ReportsModule,
+    AdminModule,
   ],
 })
 export class AppModule {}
