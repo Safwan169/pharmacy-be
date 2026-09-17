@@ -8,7 +8,11 @@ import {
   IsInt,
   IsNumber,
   IsOptional,
+  IsString,
+  Max,
+  MaxLength,
   Min,
+  MinLength,
   Validate,
   ValidateNested,
   ValidationArguments,
@@ -73,6 +77,20 @@ export class DiscountDto {
   value!: number;
 }
 
+export class InlineCustomerDto {
+  @ApiProperty({ example: 'Karim Uddin', maxLength: 100 })
+  @IsString()
+  @MinLength(1)
+  @MaxLength(100)
+  name!: string;
+
+  @ApiPropertyOptional({ example: '01711000000', maxLength: 20 })
+  @IsString()
+  @MaxLength(20)
+  @IsOptional()
+  phone?: string;
+}
+
 export class CheckoutDto {
   @ApiProperty({ type: CheckoutItemDto, isArray: true, minItems: 1 })
   @IsArray()
@@ -90,12 +108,44 @@ export class CheckoutDto {
   @Type(() => DiscountDto)
   discount?: DiscountDto;
 
-  @ApiPropertyOptional({
+  @ApiProperty({
     enum: PAYMENT_METHODS,
-    default: 'cash',
-    description: 'Cash is the only method supported today.',
+    example: 'cash',
+    description: '`due` needs `customer_id` or an inline `customer`.',
+  })
+  @IsIn(PAYMENT_METHODS)
+  payment_method!: (typeof PAYMENT_METHODS)[number];
+
+  @ApiPropertyOptional({
+    example: 500,
+    description: 'Cash only: what the customer handed over. Change is computed.',
+  })
+  @Type(() => Number)
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0)
+  @Max(99_999_999.99)
+  @IsOptional()
+  amount_tendered?: number;
+
+  @ApiPropertyOptional({ example: 'BKD7X1A2', maxLength: 30, description: 'bKash only.' })
+  @IsString()
+  @MaxLength(30)
+  @IsOptional()
+  bkash_trx_id?: string;
+
+  @ApiPropertyOptional({ example: 3, description: 'Due only: an existing customer.' })
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @IsOptional()
+  customer_id?: number;
+
+  @ApiPropertyOptional({
+    type: () => InlineCustomerDto,
+    description: 'Due only: create the customer on the spot instead of customer_id.',
   })
   @IsOptional()
-  @IsIn(PAYMENT_METHODS)
-  payment_method?: string;
+  @ValidateNested()
+  @Type(() => InlineCustomerDto)
+  customer?: InlineCustomerDto;
 }

@@ -1,8 +1,8 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import { DataSource, Repository } from 'typeorm';
 import { ProductVariant } from '../product-variants/entities/product-variant.entity';
+import { SettingsService } from '../settings/settings.service';
 import {
   CivilDateRange,
   PHARMACY_TIME_ZONE,
@@ -77,17 +77,12 @@ interface SummaryRow {
 
 @Injectable()
 export class DashboardService {
-  private readonly lowStockThreshold: number;
-
   constructor(
     @InjectRepository(ProductVariant)
     private readonly variantsRepository: Repository<ProductVariant>,
     @InjectDataSource() private readonly dataSource: DataSource,
-    configService: ConfigService,
-  ) {
-    this.lowStockThreshold =
-      configService.getOrThrow<number>('lowStockThreshold');
-  }
+    private readonly settingsService: SettingsService,
+  ) {}
 
   /**
    * Everything currently below the restock threshold, most urgent first.
@@ -107,7 +102,7 @@ export class DashboardService {
       // expired strips still shows up here.
       .addSelect(SELLABLE_STOCK_SQL, 'sellable')
       .andWhere(`${SELLABLE_STOCK_SQL} < :threshold`, {
-        threshold: this.lowStockThreshold,
+        threshold: await this.settingsService.lowStockThreshold(),
       })
       // A withdrawn SKU is not meant to be restocked, so it must not sit in the
       // restock worklist nagging about stock nobody intends to replace.

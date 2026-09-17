@@ -7,6 +7,7 @@ import { SaleItem } from './entities/sale-item.entity';
 import { SaleReturn, SaleReturnItem } from './entities/sale-return.entity';
 import { Sale } from './entities/sale.entity';
 import { InvoicePdfService } from './invoice-pdf.service';
+import { ReceiptPdfService } from './receipt-pdf.service';
 import { SalesController } from './sales.controller';
 import { ReturnsService } from './returns.service';
 import { SalesService } from './sales.service';
@@ -24,7 +25,7 @@ import { SalesService } from './sales.service';
     StockModule,
   ],
   controllers: [SalesController],
-  providers: [SalesService, InvoicePdfService, ReturnsService],
-  exports: [SalesService],
+  providers: [SalesService, InvoicePdfService, ReceiptPdfService, ReturnsService],
+  exports: [SalesService, ReceiptPdfService],
 })
 export class SalesModule {}

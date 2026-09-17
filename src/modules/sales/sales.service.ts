@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Injectable,
   NotFoundException,
   UnprocessableEntityException,
@@ -6,6 +7,8 @@ import {
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import { DataSource, EntityManager, In, Repository } from 'typeorm';
 import { PaginatedDto, paginate } from '../../common/dto/paginated.dto';
+import { adjustCustomerBalance } from '../customers/customer-balance';
+import { Customer } from '../customers/entities/customer.entity';
 import { ProductVariant } from '../product-variants/entities/product-variant.entity';
 import { VariantUnit } from '../product-variants/entities/variant-unit.entity';
 import { BatchAllocation, StockService } from '../stock/stock.service';
@@ -16,7 +19,12 @@ import { ListSalesQueryDto } from './dto/list-sales-query.dto';
 import { SaleItem } from './entities/sale-item.entity';
 import { Sale } from './entities/sale.entity';
 
-const DEFAULT_PAYMENT_METHOD = 'cash';
+import { fromMinorUnits, toMinorUnits } from '../../common/money';
+
+function normalisePhone(phone: string | undefined | null): string | null {
+  const digits = (phone ?? '').replace(/[^\d+]/g, '');
+  return digits === '' ? null : digits;
+}
 const BARE_DATE = /^\d{4}-\d{2}-\d{2}$/;
 
 interface InvoiceSequenceRow {
@@ -41,6 +49,12 @@ export class SalesService {
     const duplicates = findDuplicateVariants(dto.items);
     if (duplicates.length > 0) {
       throw rejectCheckout(duplicates);
+    }
+    if (dto.payment_method === 'due' && dto.customer_id === undefined && dto.customer === undefined) {
+      throw new BadRequestException({
+        message: 'A due sale needs a customer: send customer_id or customer { name, phone }.',
+        reason: 'customer_required',
+      });
     }
 
     const saleId = await this.dataSource.transaction(async (manager) => {
@@ -149,6 +163,32 @@ export class SalesService {
         dto.discount,
       );
 
+      // How the money is settled. Cash may record what was handed over so the
+      // receipt can show the change; due books the whole total to the customer.
+      const totalMinor = toMinorUnits(totals.totalAmount);
+      let amountTendered: number | null = null;
+      let changeGiven: number | null = null;
+      let customerId: number | null = null;
+      let paidMinor = totalMinor;
+      let dueMinor = 0;
+
+      if (dto.payment_method === 'cash' && dto.amount_tendered !== undefined) {
+        const tenderedMinor = toMinorUnits(dto.amount_tendered);
+        if (tenderedMinor < totalMinor) {
+          throw new BadRequestException({
+            message: 'The cash handed over is less than the total.',
+            reason: 'tendered_short',
+          });
+        }
+        amountTendered = fromMinorUnits(tenderedMinor);
+        changeGiven = fromMinorUnits(tenderedMinor - totalMinor);
+      }
+      if (dto.payment_method === 'due') {
+        customerId = await this.resolveCustomer(manager, dto.customer_id, dto.customer);
+        paidMinor = 0;
+        dueMinor = totalMinor;
+      }
+
       // The sale row first, so stock movements can reference its id.
       const sale = await manager.save(
         manager.create(Sale, {
@@ -158,10 +198,20 @@ export class SalesService {
           discountValue: dto.discount?.value ?? null,
           discountAmount: totals.discountAmount,
           totalAmount: totals.totalAmount,
-          paymentMethod: dto.payment_method ?? DEFAULT_PAYMENT_METHOD,
+          paymentMethod: dto.payment_method,
+          customerId,
+          amountTendered,
+          changeGiven,
+          bkashTrxId:
+            dto.payment_method === 'bkash' ? dto.bkash_trx_id?.trim() || null : null,
+          paidAmount: fromMinorUnits(paidMinor),
+          dueAmount: fromMinorUnits(dueMinor),
           createdById: userId,
         }),
       );
+      if (customerId !== null && dueMinor > 0) {
+        await adjustCustomerBalance(manager, customerId, dueMinor);
+      }
 
       // Deduct in a stable id order so two concurrent checkouts touching the
       // same variants take row locks in the same sequence and can't deadlock.
@@ -288,6 +338,38 @@ export class SalesService {
     return sale;
   }
 
+  /** An existing customer by id, or a new one from name + phone (reusing a phone match). */
+  private async resolveCustomer(
+    manager: EntityManager,
+    customerId: number | undefined,
+    inline: { name: string; phone?: string } | undefined,
+  ): Promise<number> {
+    if (customerId !== undefined) {
+      const found = await manager.findOne(Customer, { where: { id: customerId } });
+      if (!found || !found.isActive) {
+        throw new BadRequestException({
+          message: 'That customer does not exist.',
+          reason: 'customer_not_found',
+        });
+      }
+      return found.id;
+    }
+    const phone = normalisePhone(inline!.phone);
+    if (phone) {
+      const existing = await manager.findOne(Customer, { where: { phone } });
+      if (existing) return existing.id;
+    }
+    const created = await manager.save(
+      manager.create(Customer, {
+        name: inline!.name.trim(),
+        phone,
+        address: null,
+        dueBalance: 0,
+      }),
+    );
+    return created.id;
+  }
+
   /**
    * Atomic per-day counter. The `ON CONFLICT DO UPDATE` takes a row lock, so
    * concurrent checkouts serialise here and each gets a distinct sequence.
@@ -315,7 +397,8 @@ export class SalesService {
     return this.salesRepository
       .createQueryBuilder('sale')
       .leftJoin('sale.createdBy', 'cashier')
-      .addSelect(['cashier.id', 'cashier.email', 'cashier.name', 'cashier.role']);
+      .addSelect(['cashier.id', 'cashier.email', 'cashier.name', 'cashier.role'])
+      .leftJoinAndSelect('sale.customer', 'customer');
   }
 }
 

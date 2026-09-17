@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import * as fs from 'fs';
 import PDFDocument from 'pdfkit';
 import { formatAmount } from '../../common/money';
+import { SettingsService, ShopSettings } from '../settings/settings.service';
 import { Sale } from './entities/sale.entity';
 
 /**
@@ -27,6 +28,8 @@ export class InvoicePdfService {
   private readonly logger = new Logger(InvoicePdfService.name);
   private readonly fontPath = process.env.INVOICE_FONT_PATH;
   private readonly customFont: Buffer | null = this.loadCustomFont();
+
+  constructor(private readonly settingsService: SettingsService) {}
 
   /**
    * Renders the invoice and resolves once the whole PDF is buffered.
@@ -55,7 +58,8 @@ export class InvoicePdfService {
       doc.font('invoice');
     }
 
-    this.drawHeader(doc, sale);
+    const settings = await this.settingsService.getAll();
+    this.drawHeader(doc, sale, settings);
     const tableEndY = this.drawItems(doc, sale);
     this.drawTotals(doc, sale, tableEndY);
     this.drawFooter(doc, sale);
@@ -87,8 +91,21 @@ export class InvoicePdfService {
     }
   }
 
-  private drawHeader(doc: PDFKit.PDFDocument, sale: Sale): void {
-    doc.fontSize(20).text('Pharmacy Management System', { align: 'center' });
+  private drawHeader(
+    doc: PDFKit.PDFDocument,
+    sale: Sale,
+    settings: ShopSettings,
+  ): void {
+    doc.fontSize(20).text(settings.shop_name || 'Pharmacy', { align: 'center' });
+    doc.fontSize(9);
+    if (settings.shop_address) doc.text(settings.shop_address, { align: 'center' });
+    const contact = [
+      settings.shop_phone ? `Phone: ${settings.shop_phone}` : '',
+      settings.drug_license_no ? `Drug Licence: ${settings.drug_license_no}` : '',
+    ]
+      .filter(Boolean)
+      .join('   ');
+    if (contact) doc.text(contact, { align: 'center' });
     doc.moveDown(0.3);
     doc.fontSize(14).text('INVOICE', { align: 'center' });
     if (sale.status === 'voided') {
@@ -199,7 +216,13 @@ export class InvoicePdfService {
     doc.moveDown(1.5);
     doc.fontSize(10);
     doc.text(`Payment method: ${sale.paymentMethod}`, COLUMNS.item);
-    doc.text(`Processed by: ${sale.createdBy?.email ?? 'unknown'}`);
+    if (sale.paymentMethod === 'due') {
+      doc.text(`Due on this invoice: ${this.money(sale.dueAmount)}`);
+    }
+    if (sale.customer) {
+      doc.text(`Customer: ${sale.customer.name}${sale.customer.phone ? ` (${sale.customer.phone})` : ''}`);
+    }
+    doc.text(`Processed by: ${sale.createdBy?.name || sale.createdBy?.email || 'unknown'}`);
   }
 }
 

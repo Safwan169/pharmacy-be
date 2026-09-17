@@ -8,6 +8,7 @@ import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource, EntityManager } from 'typeorm';
 import { nextDocumentNumber } from '../../common/document-number';
 import { fromMinorUnits, toMinorUnits } from '../../common/money';
+import { adjustCustomerBalance } from '../customers/customer-balance';
 import { civilDateIn, PHARMACY_TIME_ZONE } from '../dashboard/date-range';
 import { StockBatch } from '../stock/entities/stock-batch.entity';
 import { StockMovement } from '../stock/entities/stock-movement.entity';
@@ -77,6 +78,10 @@ export class ReturnsService {
         });
       }
 
+      // A voided due sale no longer counts against the customer.
+      if (sale.customerId !== null && sale.dueAmount > 0) {
+        await adjustCustomerBalance(manager, sale.customerId, -toMinorUnits(sale.dueAmount));
+      }
       await manager.update(
         Sale,
         { id: saleId },
@@ -85,6 +90,7 @@ export class ReturnsService {
           voidedAt: new Date(),
           voidedById: userId,
           voidReason: dto.reason.trim(),
+          dueAmount: 0,
         },
       );
     });
@@ -222,6 +228,22 @@ export class ReturnsService {
         { id: saleReturn.id },
         { refundAmount: fromMinorUnits(refundTotalMinor) },
       );
+      if (dto.refund_method === 'due_adjust') {
+        if (sale.customerId === null) {
+          throw new ConflictException({
+            message: 'This sale has no customer, so there is no due balance to reduce. Refund in cash or bKash.',
+            reason: 'no_customer',
+          });
+        }
+        // Take the refund off what they still owe on this sale first, then the balance.
+        const offSale = Math.min(refundTotalMinor, toMinorUnits(sale.dueAmount));
+        await manager.update(
+          Sale,
+          { id: saleId },
+          { dueAmount: fromMinorUnits(toMinorUnits(sale.dueAmount) - offSale) },
+        );
+        await adjustCustomerBalance(manager, sale.customerId, -refundTotalMinor);
+      }
 
       const after = await manager.find(SaleItem, { where: { saleId } });
       const allBack = after.every((i) => i.returnedQuantity >= i.quantity);

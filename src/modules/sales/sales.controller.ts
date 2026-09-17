@@ -38,6 +38,8 @@ import { CreateReturnDto, VoidSaleDto } from './dto/return.dto';
 import { SaleReturn } from './entities/sale-return.entity';
 import { Sale } from './entities/sale.entity';
 import { InvoicePdfService } from './invoice-pdf.service';
+import { ReceiptPdfService } from './receipt-pdf.service';
+import { ReceiptQueryDto } from './dto/receipt-query.dto';
 import { ReturnsService } from './returns.service';
 import { SalesService } from './sales.service';
 
@@ -50,7 +52,30 @@ export class SalesController {
     private readonly salesService: SalesService,
     private readonly invoicePdfService: InvoicePdfService,
     private readonly returnsService: ReturnsService,
+    private readonly receiptPdfService: ReceiptPdfService,
   ) {}
+
+  @Get(':id/receipt/pdf')
+  @ApiOperation({
+    summary: 'Thermal receipt (58 or 80 mm) for the counter printer',
+    description: 'Width defaults to the receipt_width_mm setting. Served inline for printing.',
+  })
+  @ApiProduces('application/pdf')
+  @ApiNotFoundResponse({ description: 'No sale with that id.' })
+  async downloadReceipt(
+    @Param('id', ParseIntPipe) id: number,
+    @Query() query: ReceiptQueryDto,
+    @Res() res: Response,
+  ): Promise<void> {
+    const sale = await this.salesService.findOne(id);
+    const pdf = await this.receiptPdfService.renderSale(sale, query.width);
+    res.set({
+      'Content-Type': 'application/pdf',
+      'Content-Disposition': `inline; filename="${sale.invoiceNumber}-receipt.pdf"`,
+      'Content-Length': String(pdf.length),
+    });
+    res.end(pdf);
+  }
 
   @Post(':id/void')
   @Roles('owner')
