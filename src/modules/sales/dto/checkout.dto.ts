@@ -25,7 +25,13 @@ export class CheckoutItemDto {
   @Min(1)
   variant_id!: number;
 
-  @ApiProperty({ example: 2, minimum: 1 })
+  @ApiProperty({ example: 12, description: 'variant_units.id - the unit sold.' })
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  unit_id!: number;
+
+  @ApiProperty({ example: 2, minimum: 1, description: 'In that unit.' })
   @Type(() => Number)
   @IsInt()
   @Min(1)

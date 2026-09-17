@@ -63,9 +63,29 @@ export class SaleItem {
   })
   strengthSnapshot!: string | null;
 
+  @ApiProperty({ example: 'strip', description: 'Unit it was sold in.' })
+  @Column({
+    name: 'unit_name_snapshot',
+    type: 'varchar',
+    length: 30,
+    default: 'piece',
+  })
+  unitNameSnapshot!: string;
+
+  @ApiProperty({ example: 10, description: 'Base units in one sold unit.' })
+  @Column({ name: 'qty_in_base', type: 'integer', default: 1 })
+  qtyInBase!: number;
+
+  @ApiProperty({
+    example: 20,
+    description: 'quantity * qty_in_base — what left the stock count.',
+  })
+  @Column({ name: 'base_qty_deducted', type: 'integer', default: 0 })
+  baseQtyDeducted!: number;
+
   @ApiProperty({
     example: 50,
-    description: 'variant.price at the moment of checkout.',
+    description: 'Price of the sold unit at the moment of checkout.',
   })
   @Column({
     name: 'unit_price',
@@ -76,7 +96,7 @@ export class SaleItem {
   })
   unitPrice!: number;
 
-  @ApiProperty({ example: 2 })
+  @ApiProperty({ example: 2, description: 'In the sold unit.' })
   @Column({ type: 'integer' })
   quantity!: number;
 

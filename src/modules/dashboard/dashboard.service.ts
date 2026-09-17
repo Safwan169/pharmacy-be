@@ -102,6 +102,7 @@ export class DashboardService {
       manufacturer: variant.product.manufacturer.name,
       // Non-null: the IS NOT NULL filter above is what this list selects on.
       stock_quantity: variant.stockQuantity!,
+      base_unit: variant.baseUnit,
     }));
   }
 

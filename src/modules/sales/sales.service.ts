@@ -7,6 +7,7 @@ import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import { DataSource, EntityManager, In, Repository } from 'typeorm';
 import { PaginatedDto, paginate } from '../../common/dto/paginated.dto';
 import { ProductVariant } from '../product-variants/entities/product-variant.entity';
+import { VariantUnit } from '../product-variants/entities/variant-unit.entity';
 import { computeCheckoutTotals, formatInvoiceNumber } from './checkout-totals';
 import { CheckoutItemFailureDto } from './dto/checkout-failure.dto';
 import { CheckoutDto } from './dto/checkout.dto';
@@ -43,9 +44,11 @@ export class SalesService {
     const saleId = await this.dataSource.transaction(async (manager) => {
       const variants = await manager.find(ProductVariant, {
         where: { id: In(dto.items.map((item) => item.variant_id)) },
-        relations: { product: true },
+        relations: { product: true, units: true },
       });
       const variantsById = new Map(variants.map((v) => [v.id, v]));
+      // Resolved per line: the unit sold and how many base units that moves.
+      const lineUnits = new Map<number, VariantUnit>();
 
       const failures: CheckoutItemFailureDto[] = [];
       for (const item of dto.items) {
@@ -71,21 +74,46 @@ export class SalesService {
           });
           continue;
         }
-        if (variant.price === null) {
+        const unit = variant.units.find((u) => u.id === item.unit_id);
+        if (unit === undefined) {
           failures.push({
             variant_id: item.variant_id,
-            reason: 'not_priced',
-            message: 'This item has no price set yet and cannot be sold.',
+            unit_id: item.unit_id,
+            reason: 'unit_not_found',
+            message: 'This item is not sold in that unit any more.',
             requested_quantity: item.quantity,
           });
           continue;
         }
-        const available = variant.stockQuantity ?? 0;
+        if (!unit.isSellable) {
+          failures.push({
+            variant_id: item.variant_id,
+            unit_id: item.unit_id,
+            reason: 'unit_not_sellable',
+            message: `This item is not sold by the ${unit.name}.`,
+            requested_quantity: item.quantity,
+          });
+          continue;
+        }
+        if (unit.price === null) {
+          failures.push({
+            variant_id: item.variant_id,
+            unit_id: item.unit_id,
+            reason: 'not_priced',
+            message: `This item has no ${unit.name} price set yet and cannot be sold.`,
+            requested_quantity: item.quantity,
+          });
+          continue;
+        }
+        lineUnits.set(item.variant_id, unit);
+        const availableBase = variant.stockQuantity ?? 0;
+        const available = Math.floor(availableBase / unit.qtyInBase);
         if (available < item.quantity) {
           failures.push({
             variant_id: item.variant_id,
+            unit_id: item.unit_id,
             reason: 'insufficient_stock',
-            message: `Only ${available} in stock, ${item.quantity} requested.`,
+            message: `Only ${available} ${unit.name} in stock, ${item.quantity} requested.`,
             requested_quantity: item.quantity,
             available_quantity: available,
           });
@@ -101,13 +129,15 @@ export class SalesService {
         (a, b) => a.variant_id - b.variant_id,
       );
       for (const item of ordered) {
+        const baseQty =
+          item.quantity * lineUnits.get(item.variant_id)!.qtyInBase;
         const result = await manager
           .createQueryBuilder()
           .update(ProductVariant)
           .set({ stockQuantity: () => 'stock_quantity - :decrement' })
-          .setParameter('decrement', item.quantity)
+          .setParameter('decrement', baseQty)
           .where('id = :id', { id: item.variant_id })
-          .andWhere('stock_quantity >= :required', { required: item.quantity })
+          .andWhere('stock_quantity >= :required', { required: baseQty })
           // Re-checked here, not just in the loop above, so a withdrawal that
           // lands mid-checkout is caught by the same conditional update that
           // catches a concurrent sale.
@@ -132,8 +162,8 @@ export class SalesService {
 
       const totals = computeCheckoutTotals(
         dto.items.map((item) => ({
-          // Non-null: the price check above already rejected unpriced variants.
-          unitPrice: variantsById.get(item.variant_id)!.price!,
+          // Non-null: the price check above already rejected unpriced units.
+          unitPrice: lineUnits.get(item.variant_id)!.price!,
           quantity: item.quantity,
         })),
         dto.discount,
@@ -150,13 +180,17 @@ export class SalesService {
         createdById: userId,
         items: dto.items.map((item, index) => {
           const variant = variantsById.get(item.variant_id)!;
+          const unit = lineUnits.get(item.variant_id)!;
           return manager.create(SaleItem, {
             productVariantId: variant.id,
             // Snapshots: a later catalogue edit must not rewrite this invoice.
             brandNameSnapshot: variant.product.brandName,
             dosageFormSnapshot: variant.dosageForm,
             strengthSnapshot: variant.strength,
-            unitPrice: variant.price!,
+            unitNameSnapshot: unit.name,
+            qtyInBase: unit.qtyInBase,
+            baseQtyDeducted: item.quantity * unit.qtyInBase,
+            unitPrice: unit.price!,
             quantity: item.quantity,
             lineTotal: totals.lineTotals[index],
           });

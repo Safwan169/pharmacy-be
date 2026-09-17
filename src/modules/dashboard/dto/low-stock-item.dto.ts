@@ -26,7 +26,10 @@ export class LowStockItemDto {
 
   @ApiProperty({
     example: 2,
-    description: 'Units left. 0 means confirmed out of stock.',
+    description: 'Base units left. 0 means confirmed out of stock.',
   })
   stock_quantity!: number;
+
+  @ApiProperty({ example: 'tablet' })
+  base_unit!: string;
 }

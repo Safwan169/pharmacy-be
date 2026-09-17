@@ -52,6 +52,7 @@ export class ProductsService {
       // the product itself once all of its SKUs had been withdrawn.
       .leftJoinAndSelect('product.variants', 'variant', 'variant.is_active')
       .leftJoinAndSelect('variant.generic', 'generic')
+      .leftJoinAndSelect('variant.units', 'unit')
       .where('product.id = :id', { id })
       .orderBy('variant.id', 'ASC')
       .getOne();

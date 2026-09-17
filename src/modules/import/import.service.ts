@@ -3,6 +3,7 @@ import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource, EntityManager } from 'typeorm';
 import { Generic } from '../generics/entities/generic.entity';
 import { Manufacturer } from '../manufacturers/entities/manufacturer.entity';
+import { baseUnitForDosageForm } from '../product-variants/base-unit';
 import { ProductVariant } from '../product-variants/entities/product-variant.entity';
 import { Product } from '../products/entities/product.entity';
 import { ImportResultDto } from './dto/import-result.dto';
@@ -81,6 +82,10 @@ export class ImportService {
           strength: variant.strength,
           slug: variant.slug,
           legacyBrandId: variant.legacyBrandId,
+          packSize: variant.packSize,
+          // Only used on insert: base_unit is left out of the update list so a
+          // re-import never overrides what the admin chose.
+          baseUnit: baseUnitForDosageForm(variant.dosageForm),
         };
       });
 
@@ -93,7 +98,14 @@ export class ImportService {
           // Explicit overwrite list — `price`, `stock_quantity` and
           // `price_updated_at` are deliberately absent so admin pricing survives.
           .orUpdate(
-            ['product_id', 'generic_id', 'dosage_form', 'strength', 'slug'],
+            [
+              'product_id',
+              'generic_id',
+              'dosage_form',
+              'strength',
+              'slug',
+              'pack_size',
+            ],
             ['legacy_brand_id'],
           )
           .execute();

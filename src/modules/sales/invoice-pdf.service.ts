@@ -16,7 +16,7 @@ const ASCII_CURRENCY = 'BDT ';
 const PAGE_MARGIN = 50;
 const COLUMNS = {
   item: 50,
-  qty: 320,
+  qty: 305,
   unitPrice: 380,
   lineTotal: 470,
 } as const;
@@ -129,10 +129,10 @@ export class InvoicePdfService {
         .filter((part): part is string => part !== null && part !== '')
         .join(' — ');
 
-      const height = doc.heightOfString(description, { width: 260 });
-      doc.text(description, COLUMNS.item, y, { width: 260 });
-      doc.text(String(item.quantity), COLUMNS.qty, y, {
-        width: 40,
+      const height = doc.heightOfString(description, { width: 250 });
+      doc.text(description, COLUMNS.item, y, { width: 250 });
+      doc.text(`${item.quantity} ${item.unitNameSnapshot}`, COLUMNS.qty, y, {
+        width: 55,
         align: 'right',
       });
       doc.text(this.money(item.unitPrice), COLUMNS.unitPrice, y, {

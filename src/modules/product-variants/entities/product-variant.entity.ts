@@ -6,6 +6,7 @@ import {
   Index,
   JoinColumn,
   ManyToOne,
+  OneToMany,
   PrimaryGeneratedColumn,
   Unique,
   UpdateDateColumn,
@@ -13,6 +14,7 @@ import {
 import { numericTransformer } from '../../../common/transformers/numeric.transformer';
 import { Generic } from '../../generics/entities/generic.entity';
 import { Product } from '../../products/entities/product.entity';
+import { VariantUnit } from './variant-unit.entity';
 
 /**
  * The sellable SKU — one row per source CSV row. Price and stock live here and
@@ -77,10 +79,32 @@ export class ProductVariant {
   @Column({ name: 'legacy_brand_id', type: 'integer', nullable: true })
   legacyBrandId!: number | null;
 
+  @ApiProperty({
+    example: 'tablet',
+    description:
+      'The smallest unit this SKU is counted in. stock_quantity is in this unit.',
+  })
+  @Column({ name: 'base_unit', type: 'varchar', length: 30, default: 'piece' })
+  baseUnit!: string;
+
+  @ApiPropertyOptional({
+    example: 30,
+    nullable: true,
+    description: 'Units per pack from the source file, when it said.',
+  })
+  @Column({ name: 'pack_size', type: 'integer', nullable: true })
+  packSize!: number | null;
+
+  @ApiProperty({ type: () => VariantUnit, isArray: true })
+  @OneToMany(() => VariantUnit, (unit) => unit.variant)
+  units!: VariantUnit[];
+
   @ApiPropertyOptional({
     example: 40.12,
     nullable: true,
-    description: 'Null until an admin sets it.',
+    description:
+      'Price of the default sellable unit. Null until an admin sets it. ' +
+      'Kept in sync from `units`; the counter reads unit prices directly.',
   })
   @Column({
     type: 'numeric',
@@ -95,7 +119,7 @@ export class ProductVariant {
     example: 250,
     nullable: true,
     description:
-      'Null means "not yet set by an admin"; 0 means confirmed out of stock.',
+      'Count in base_unit. Null means "not yet set by an admin"; 0 means confirmed out of stock.',
   })
   @Column({ name: 'stock_quantity', type: 'integer', nullable: true })
   stockQuantity!: number | null;

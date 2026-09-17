@@ -16,6 +16,7 @@ import {
   ApiNotFoundResponse,
   ApiOkResponse,
   ApiOperation,
+  ApiQuery,
   ApiTags,
   ApiUnauthorizedResponse,
 } from '@nestjs/swagger';
@@ -25,6 +26,7 @@ import {
 } from '../../common/dto/paginated.dto';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { ListVariantsQueryDto } from './dto/list-variants-query.dto';
+import { UnitTemplatesQueryDto } from './dto/unit-templates-query.dto';
 import { UpdatePricingDto } from './dto/update-pricing.dto';
 import { ProductVariant } from './entities/product-variant.entity';
 import { ProductVariantsService } from './product-variants.service';
@@ -51,6 +53,22 @@ export class ProductVariantsController {
     return this.variantsService.findAll(query);
   }
 
+  @Get('unit-templates')
+  @ApiOperation({
+    summary: 'Suggested sellable-unit ladder for a dosage form',
+    description:
+      'Tablets/capsules propose tablet -> strip -> box; injections vial -> pack; ' +
+      'liquids and topicals a single container. Prices are left blank.',
+  })
+  @ApiQuery({ name: 'dosage_form', required: false, example: 'Tablet' })
+  @ApiQuery({ name: 'pack_size', required: false, example: 30 })
+  unitTemplates(@Query() query: UnitTemplatesQueryDto) {
+    return this.variantsService.unitTemplates(
+      query.dosage_form,
+      query.pack_size,
+    );
+  }
+
   @Get(':id')
   @ApiOperation({
     summary: 'Get one variant with its product, manufacturer and generic',
@@ -65,12 +83,13 @@ export class ProductVariantsController {
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
   @ApiOperation({
-    summary: 'Set a variant’s price and/or stock',
+    summary: 'Set a variant’s sellable units, price and/or stock',
     description:
-      'Admin only. Price and stock are independent — send either alone, so a restock ' +
-      'need not resend an unchanged price. `price_updated_at` is stamped only when ' +
-      'the price is part of the request. A stock quantity of 0 means confirmed out ' +
-      'of stock, which is distinct from the null it starts at.',
+      'Admin only. `units` replaces the whole ladder (tablet / strip / box with ' +
+      'their own prices); `price` alone prices just the base unit; `stock_quantity` ' +
+      'is the count in the base unit. Any field can be sent alone. ' +
+      '`price_updated_at` is stamped only when a price is part of the request. ' +
+      'A stock quantity of 0 means confirmed out of stock, distinct from null.',
   })
   @ApiOkResponse({ description: 'Pricing updated.', type: ProductVariant })
   @ApiBadRequestResponse({

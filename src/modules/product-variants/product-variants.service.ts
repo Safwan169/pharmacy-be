@@ -3,19 +3,44 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, SelectQueryBuilder } from 'typeorm';
+import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
+import {
+  DataSource,
+  EntityManager,
+  Repository,
+  SelectQueryBuilder,
+} from 'typeorm';
 import { PaginatedDto, paginate } from '../../common/dto/paginated.dto';
+import {
+  BaseUnit,
+  UnitTemplateRow,
+  baseUnitForDosageForm,
+  unitTemplate,
+} from './base-unit';
 import { ListVariantsQueryDto } from './dto/list-variants-query.dto';
-import { UpdatePricingDto } from './dto/update-pricing.dto';
+import { UnitInputDto, UpdatePricingDto } from './dto/update-pricing.dto';
 import { ProductVariant } from './entities/product-variant.entity';
+import { VariantUnit } from './entities/variant-unit.entity';
 
 @Injectable()
 export class ProductVariantsService {
   constructor(
+    @InjectDataSource() private readonly dataSource: DataSource,
     @InjectRepository(ProductVariant)
     private readonly variantsRepository: Repository<ProductVariant>,
   ) {}
+
+  /** Suggested unit ladder for a SKU that hasn't been set up yet. */
+  unitTemplates(
+    dosageForm: string | undefined,
+    packSize: number | undefined,
+  ): { base_unit: BaseUnit; units: UnitTemplateRow[] } {
+    const baseUnit = baseUnitForDosageForm(dosageForm ?? '');
+    return {
+      base_unit: baseUnit,
+      units: unitTemplate(baseUnit, packSize ?? null),
+    };
+  }
 
   async findAll(
     query: ListVariantsQueryDto,
@@ -63,6 +88,7 @@ export class ProductVariantsService {
 
     qb.orderBy('product.brandName', 'ASC')
       .addOrderBy('variant.id', 'ASC')
+      .addOrderBy('unit.sortOrder', 'ASC')
       .skip(query.skip)
       .take(query.limit);
 
@@ -73,6 +99,7 @@ export class ProductVariantsService {
   async findOne(id: number): Promise<ProductVariant> {
     const variant = await this.baseQuery()
       .where('variant.id = :id', { id })
+      .orderBy('unit.sortOrder', 'ASC')
       .getOne();
 
     if (!variant) {
@@ -82,8 +109,12 @@ export class ProductVariantsService {
   }
 
   /**
-   * The admin's per-SKU pricing action, and the restock action — either field
-   * can be sent on its own, so a restock need not resend an unchanged price.
+   * The admin's per-SKU pricing action, and the restock action — any field
+   * can be sent on its own, so a restock need not resend an unchanged ladder.
+   *
+   * `units` replaces the whole ladder. `variant.price` is kept equal to the
+   * default unit's price so the worklist (`pricing_status`) and the catalogue
+   * listing keep working off one column.
    */
   async updatePricing(
     id: number,
@@ -92,29 +123,113 @@ export class ProductVariantsService {
     // An empty body would otherwise save nothing and still answer 200, which
     // reads as a successful update. See UpdatePricingDto for why this isn't a
     // class-validator constraint.
-    if (dto.price === undefined && dto.stock_quantity === undefined) {
+    if (
+      dto.price === undefined &&
+      dto.stock_quantity === undefined &&
+      dto.units === undefined
+    ) {
       throw new BadRequestException(
-        'Send at least one of price or stock_quantity.',
+        'Send at least one of price, stock_quantity or units.',
       );
     }
-
-    const variant = await this.variantsRepository.findOne({ where: { id } });
-    if (!variant) {
-      throw new NotFoundException(`Product variant ${id} not found`);
+    if (dto.units !== undefined) {
+      validateLadder(dto.units);
     }
 
-    if (dto.price !== undefined) {
-      variant.price = dto.price;
-      // Only stamped when the price itself moved. Stamping on a stock-only
-      // restock would claim the price was reconfirmed when nobody looked at it.
-      variant.priceUpdatedAt = new Date();
-    }
-    if (dto.stock_quantity !== undefined) {
-      variant.stockQuantity = dto.stock_quantity;
-    }
-    await this.variantsRepository.save(variant);
+    await this.dataSource.transaction(async (manager) => {
+      const variant = await manager.findOne(ProductVariant, {
+        where: { id },
+      });
+      if (!variant) {
+        throw new NotFoundException(`Product variant ${id} not found`);
+      }
+
+      let priceTouched = false;
+      if (dto.units !== undefined) {
+        await this.replaceLadder(manager, variant, dto.units);
+        priceTouched = true;
+      } else if (dto.price !== undefined) {
+        await this.setBasePrice(manager, variant, dto.price);
+        priceTouched = true;
+      }
+
+      const patch: Partial<ProductVariant> = {};
+      if (priceTouched) {
+        const units = await manager.find(VariantUnit, {
+          where: { variantId: id },
+          order: { sortOrder: 'ASC' },
+        });
+        const shown = units.find((u) => u.isDefault) ?? units[0];
+        patch.price = shown?.price ?? null;
+        // Only stamped when a price moved. Stamping on a stock-only restock
+        // would claim the price was reconfirmed when nobody looked at it.
+        patch.priceUpdatedAt = new Date();
+      }
+      if (dto.stock_quantity !== undefined) {
+        patch.stockQuantity = dto.stock_quantity;
+      }
+      await manager.update(ProductVariant, { id }, patch);
+    });
 
     return this.findOne(id);
+  }
+
+  private async replaceLadder(
+    manager: EntityManager,
+    variant: ProductVariant,
+    units: UnitInputDto[],
+  ): Promise<void> {
+    const wanted = new Map(
+      units.map((u) => [u.name.trim().toLowerCase(), u] as const),
+    );
+    const existing = await manager.find(VariantUnit, {
+      where: { variantId: variant.id },
+    });
+
+    for (const row of existing) {
+      if (!wanted.has(row.name)) {
+        await manager.remove(row);
+      }
+    }
+
+    let sortOrder = 0;
+    for (const [name, input] of wanted) {
+      const row =
+        existing.find((u) => u.name === name) ??
+        manager.create(VariantUnit, { variantId: variant.id, name });
+      row.qtyInBase = input.qty_in_base;
+      row.price = input.price ?? null;
+      row.isSellable = input.is_sellable ?? true;
+      row.isDefault = input.is_default ?? false;
+      row.sortOrder = sortOrder++;
+      await manager.save(row);
+    }
+  }
+
+  /** Legacy shortcut: price the base unit alone, creating its row if needed. */
+  private async setBasePrice(
+    manager: EntityManager,
+    variant: ProductVariant,
+    price: number,
+  ): Promise<void> {
+    let base = await manager.findOne(VariantUnit, {
+      where: { variantId: variant.id, qtyInBase: 1 },
+    });
+    if (!base) {
+      const others = await manager.count(VariantUnit, {
+        where: { variantId: variant.id },
+      });
+      base = manager.create(VariantUnit, {
+        variantId: variant.id,
+        name: variant.baseUnit,
+        qtyInBase: 1,
+        isSellable: true,
+        isDefault: others === 0,
+        sortOrder: 0,
+      });
+    }
+    base.price = price;
+    await manager.save(base);
   }
 
   /**
@@ -144,8 +259,7 @@ export class ProductVariantsService {
       throw new NotFoundException(`Product variant ${id} not found`);
     }
 
-    variant.isActive = isActive;
-    await this.variantsRepository.save(variant);
+    await this.variantsRepository.update({ id }, { isActive });
 
     return this.findOne(id);
   }
@@ -155,6 +269,31 @@ export class ProductVariantsService {
       .createQueryBuilder('variant')
       .innerJoinAndSelect('variant.product', 'product')
       .innerJoinAndSelect('product.manufacturer', 'manufacturer')
-      .leftJoinAndSelect('variant.generic', 'generic');
+      .leftJoinAndSelect('variant.generic', 'generic')
+      .leftJoinAndSelect('variant.units', 'unit');
+  }
+}
+
+/** Ladder rules that span rows, so class-validator can't express them. */
+function validateLadder(units: UnitInputDto[]): void {
+  const names = units.map((u) => u.name.trim().toLowerCase());
+  if (new Set(names).size !== names.length) {
+    throw new BadRequestException('Each unit name may appear only once.');
+  }
+  const defaults = units.filter((u) => u.is_default === true);
+  if (defaults.length !== 1) {
+    throw new BadRequestException('Exactly one unit must be the default.');
+  }
+  if (defaults[0].is_sellable === false) {
+    throw new BadRequestException('The default unit must be sellable.');
+  }
+  if (!units.some((u) => u.qty_in_base === 1)) {
+    throw new BadRequestException(
+      'Include the base unit (qty_in_base = 1), even if it is not sellable.',
+    );
+  }
+  const qtys = units.map((u) => u.qty_in_base);
+  if (new Set(qtys).size !== qtys.length) {
+    throw new BadRequestException('Two units cannot have the same size.');
   }
 }
