@@ -7,6 +7,7 @@ export const CHECKOUT_FAILURE_REASONS = [
   'unit_not_found',
   'unit_not_sellable',
   'insufficient_stock',
+  'expired_only',
   'duplicate_item',
   'stock_changed',
 ] as const;

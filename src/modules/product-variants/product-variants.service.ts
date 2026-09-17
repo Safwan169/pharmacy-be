@@ -11,6 +11,7 @@ import {
   SelectQueryBuilder,
 } from 'typeorm';
 import { PaginatedDto, paginate } from '../../common/dto/paginated.dto';
+import { StockService } from '../stock/stock.service';
 import {
   BaseUnit,
   UnitTemplateRow,
@@ -28,6 +29,7 @@ export class ProductVariantsService {
     @InjectDataSource() private readonly dataSource: DataSource,
     @InjectRepository(ProductVariant)
     private readonly variantsRepository: Repository<ProductVariant>,
+    private readonly stockService: StockService,
   ) {}
 
   /** Suggested unit ladder for a SKU that hasn't been set up yet. */
@@ -105,6 +107,7 @@ export class ProductVariantsService {
     if (!variant) {
       throw new NotFoundException(`Product variant ${id} not found`);
     }
+    variant.batches = await this.stockService.batchesForVariant(id);
     return variant;
   }
 
@@ -119,6 +122,7 @@ export class ProductVariantsService {
   async updatePricing(
     id: number,
     dto: UpdatePricingDto,
+    userId: number | null = null,
   ): Promise<ProductVariant> {
     // An empty body would otherwise save nothing and still answer 200, which
     // reads as a successful update. See UpdatePricingDto for why this isn't a
@@ -165,10 +169,20 @@ export class ProductVariantsService {
         // would claim the price was reconfirmed when nobody looked at it.
         patch.priceUpdatedAt = new Date();
       }
-      if (dto.stock_quantity !== undefined) {
-        patch.stockQuantity = dto.stock_quantity;
+      if (Object.keys(patch).length > 0) {
+        await manager.update(ProductVariant, { id }, patch);
       }
-      await manager.update(ProductVariant, { id }, patch);
+      // "Set stock to N" is a count correction: the difference is booked as an
+      // adjustment against batches so the ledger and batch totals stay honest.
+      if (dto.stock_quantity !== undefined) {
+        await this.stockService.adjustToCount(
+          manager,
+          id,
+          dto.stock_quantity,
+          userId,
+          dto.stock_note,
+        );
+      }
     });
 
     return this.findOne(id);

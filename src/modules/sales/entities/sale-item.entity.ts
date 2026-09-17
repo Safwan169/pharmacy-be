@@ -10,6 +10,7 @@ import {
 } from 'typeorm';
 import { numericTransformer } from '../../../common/transformers/numeric.transformer';
 import { ProductVariant } from '../../product-variants/entities/product-variant.entity';
+import { StockBatch } from '../../stock/entities/stock-batch.entity';
 import { Sale } from './sale.entity';
 
 /**
@@ -62,6 +63,15 @@ export class SaleItem {
     nullable: true,
   })
   strengthSnapshot!: string | null;
+
+  @ApiPropertyOptional({ example: 7, nullable: true, description: 'Batch the stock came from.' })
+  @Index('idx_sale_items_batch')
+  @Column({ name: 'batch_id', type: 'integer', nullable: true })
+  batchId!: number | null;
+
+  @ManyToOne(() => StockBatch, { nullable: true, onDelete: 'SET NULL' })
+  @JoinColumn({ name: 'batch_id' })
+  batch!: StockBatch | null;
 
   @ApiProperty({ example: 'strip', description: 'Unit it was sold in.' })
   @Column({

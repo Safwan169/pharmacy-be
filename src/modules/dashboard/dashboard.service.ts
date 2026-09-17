@@ -47,6 +47,13 @@ const SUMMARY_SQL = `
   SELECT * FROM sale_totals, item_totals
 `;
 
+/** Base units in batches that can still be sold. Mirrors StockService.SELLABLE_BATCH_WHERE. */
+const SELLABLE_STOCK_SQL = `(
+  SELECT COALESCE(SUM(b.quantity), 0) FROM stock_batches b
+  WHERE b.variant_id = variant.id AND b.quantity > 0
+    AND (b.expiry_date IS NULL OR b.expiry_date >= CURRENT_DATE)
+)`;
+
 /** `pg` hands back NUMERIC and bigint COUNT columns as strings. */
 interface SummaryRow {
   total_earning: string;
@@ -83,25 +90,29 @@ export class DashboardService {
       // it would drop out of the comparison below anyway, since NULL < 5 is
       // NULL rather than true. Stated outright so that isn't load-bearing.
       .where('variant.stockQuantity IS NOT NULL')
-      .andWhere('variant.stockQuantity < :threshold', {
+      // Expired batches don't count as stock you can sell, so a shelf full of
+      // expired strips still shows up here.
+      .addSelect(SELLABLE_STOCK_SQL, 'sellable')
+      .andWhere(`${SELLABLE_STOCK_SQL} < :threshold`, {
         threshold: this.lowStockThreshold,
       })
       // A withdrawn SKU is not meant to be restocked, so it must not sit in the
       // restock worklist nagging about stock nobody intends to replace.
       .andWhere('variant.isActive = true')
-      .orderBy('variant.stockQuantity', 'ASC')
+      .orderBy('sellable', 'ASC')
       // Ties broken by id so repeated polls don't reshuffle the widget.
       .addOrderBy('variant.id', 'ASC')
-      .getMany();
+      .getRawAndEntities();
 
-    return variants.map((variant) => ({
+    return variants.entities.map((variant, i) => ({
       variant_id: variant.id,
       brand_name: variant.product.brandName,
       dosage_form: variant.dosageForm,
       strength: variant.strength,
       manufacturer: variant.product.manufacturer.name,
-      // Non-null: the IS NOT NULL filter above is what this list selects on.
-      stock_quantity: variant.stockQuantity!,
+      stock_quantity: Number(
+        (variants.raw[i] as { sellable: string | number }).sellable,
+      ),
       base_unit: variant.baseUnit,
     }));
   }

@@ -24,7 +24,9 @@ import {
   ApiPaginatedResponse,
   PaginatedDto,
 } from '../../common/dto/paginated.dto';
+import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
+import type { AuthenticatedUser } from '../../common/types/authenticated-user';
 import { ListVariantsQueryDto } from './dto/list-variants-query.dto';
 import { UnitTemplatesQueryDto } from './dto/unit-templates-query.dto';
 import { UpdatePricingDto } from './dto/update-pricing.dto';
@@ -100,8 +102,9 @@ export class ProductVariantsController {
   updatePricing(
     @Param('id', ParseIntPipe) id: number,
     @Body() dto: UpdatePricingDto,
+    @CurrentUser() user: AuthenticatedUser,
   ): Promise<ProductVariant> {
-    return this.variantsService.updatePricing(id, dto);
+    return this.variantsService.updatePricing(id, dto, user.id);
   }
 
   @Delete(':id')

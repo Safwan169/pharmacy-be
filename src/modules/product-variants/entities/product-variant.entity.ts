@@ -14,6 +14,7 @@ import {
 import { numericTransformer } from '../../../common/transformers/numeric.transformer';
 import { Generic } from '../../generics/entities/generic.entity';
 import { Product } from '../../products/entities/product.entity';
+import { StockBatch } from '../../stock/entities/stock-batch.entity';
 import { VariantUnit } from './variant-unit.entity';
 
 /**
@@ -98,6 +99,14 @@ export class ProductVariant {
   @ApiProperty({ type: () => VariantUnit, isArray: true })
   @OneToMany(() => VariantUnit, (unit) => unit.variant)
   units!: VariantUnit[];
+
+  @ApiPropertyOptional({
+    type: () => StockBatch,
+    isArray: true,
+    description: 'Only on GET /variants/:id. Batches with stock, plus recently emptied ones.',
+  })
+  @OneToMany(() => StockBatch, (batch) => batch.variant)
+  batches?: StockBatch[];
 
   @ApiPropertyOptional({
     example: 40.12,

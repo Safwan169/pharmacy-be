@@ -8,6 +8,7 @@ import { DataSource, EntityManager, In, Repository } from 'typeorm';
 import { PaginatedDto, paginate } from '../../common/dto/paginated.dto';
 import { ProductVariant } from '../product-variants/entities/product-variant.entity';
 import { VariantUnit } from '../product-variants/entities/variant-unit.entity';
+import { BatchAllocation, StockService } from '../stock/stock.service';
 import { computeCheckoutTotals, formatInvoiceNumber } from './checkout-totals';
 import { CheckoutItemFailureDto } from './dto/checkout-failure.dto';
 import { CheckoutDto } from './dto/checkout.dto';
@@ -28,6 +29,7 @@ export class SalesService {
   constructor(
     @InjectDataSource() private readonly dataSource: DataSource,
     @InjectRepository(Sale) private readonly salesRepository: Repository<Sale>,
+    private readonly stockService: StockService,
   ) {}
 
   /**
@@ -49,6 +51,8 @@ export class SalesService {
       const variantsById = new Map(variants.map((v) => [v.id, v]));
       // Resolved per line: the unit sold and how many base units that moves.
       const lineUnits = new Map<number, VariantUnit>();
+      // Which batches each line draws from, soonest expiry first.
+      const lineBatches = new Map<number, BatchAllocation[]>();
 
       const failures: CheckoutItemFailureDto[] = [];
       for (const item of dto.items) {
@@ -106,58 +110,34 @@ export class SalesService {
           continue;
         }
         lineUnits.set(item.variant_id, unit);
-        const availableBase = variant.stockQuantity ?? 0;
-        const available = Math.floor(availableBase / unit.qtyInBase);
-        if (available < item.quantity) {
+        // Stock is what the unexpired batches hold, not the raw total.
+        const allocation = await this.stockService.allocate(
+          manager,
+          variant.id,
+          item.quantity * unit.qtyInBase,
+        );
+        if (!allocation.ok) {
+          const available = Math.floor(allocation.available / unit.qtyInBase);
           failures.push({
             variant_id: item.variant_id,
             unit_id: item.unit_id,
-            reason: 'insufficient_stock',
-            message: `Only ${available} ${unit.name} in stock, ${item.quantity} requested.`,
+            reason:
+              allocation.reason === 'expired_only'
+                ? 'expired_only'
+                : 'insufficient_stock',
+            message:
+              allocation.reason === 'expired_only'
+                ? 'The only stock left has expired and cannot be sold.'
+                : `Only ${available} ${unit.name} in stock, ${item.quantity} requested.`,
             requested_quantity: item.quantity,
             available_quantity: available,
           });
+          continue;
         }
+        lineBatches.set(item.variant_id, allocation.allocations);
       }
       if (failures.length > 0) {
         throw rejectCheckout(failures);
-      }
-
-      // Deduct in a stable id order so two concurrent checkouts touching the
-      // same variants take row locks in the same sequence and can't deadlock.
-      const ordered = [...dto.items].sort(
-        (a, b) => a.variant_id - b.variant_id,
-      );
-      for (const item of ordered) {
-        const baseQty =
-          item.quantity * lineUnits.get(item.variant_id)!.qtyInBase;
-        const result = await manager
-          .createQueryBuilder()
-          .update(ProductVariant)
-          .set({ stockQuantity: () => 'stock_quantity - :decrement' })
-          .setParameter('decrement', baseQty)
-          .where('id = :id', { id: item.variant_id })
-          .andWhere('stock_quantity >= :required', { required: baseQty })
-          // Re-checked here, not just in the loop above, so a withdrawal that
-          // lands mid-checkout is caught by the same conditional update that
-          // catches a concurrent sale.
-          .andWhere('is_active = true')
-          .execute();
-
-        // Zero rows means someone else bought it, or it was withdrawn, between
-        // the check above and now. Roll the whole thing back rather than
-        // partially selling.
-        if (result.affected !== 1) {
-          throw rejectCheckout([
-            {
-              variant_id: item.variant_id,
-              reason: 'stock_changed',
-              message:
-                'This item changed while checking out. Nothing was sold — please retry.',
-              requested_quantity: item.quantity,
-            },
-          ]);
-        }
       }
 
       const totals = computeCheckoutTotals(
@@ -169,20 +149,66 @@ export class SalesService {
         dto.discount,
       );
 
-      const sale = manager.create(Sale, {
-        invoiceNumber: await this.nextInvoiceNumber(manager),
-        subtotal: totals.subtotal,
-        discountType: dto.discount?.type ?? null,
-        discountValue: dto.discount?.value ?? null,
-        discountAmount: totals.discountAmount,
-        totalAmount: totals.totalAmount,
-        paymentMethod: dto.payment_method ?? DEFAULT_PAYMENT_METHOD,
-        createdById: userId,
-        items: dto.items.map((item, index) => {
-          const variant = variantsById.get(item.variant_id)!;
-          const unit = lineUnits.get(item.variant_id)!;
-          return manager.create(SaleItem, {
+      // The sale row first, so stock movements can reference its id.
+      const sale = await manager.save(
+        manager.create(Sale, {
+          invoiceNumber: await this.nextInvoiceNumber(manager),
+          subtotal: totals.subtotal,
+          discountType: dto.discount?.type ?? null,
+          discountValue: dto.discount?.value ?? null,
+          discountAmount: totals.discountAmount,
+          totalAmount: totals.totalAmount,
+          paymentMethod: dto.payment_method ?? DEFAULT_PAYMENT_METHOD,
+          createdById: userId,
+        }),
+      );
+
+      // Deduct in a stable id order so two concurrent checkouts touching the
+      // same variants take row locks in the same sequence and can't deadlock.
+      const ordered = [...dto.items]
+        .map((item, index) => ({ item, index }))
+        .sort((a, b) => a.item.variant_id - b.item.variant_id);
+      const items: SaleItem[] = [];
+      for (const { item, index } of ordered) {
+        const variant = variantsById.get(item.variant_id)!;
+        const unit = lineUnits.get(item.variant_id)!;
+        const allocations = lineBatches.get(item.variant_id)!;
+
+        for (const allocation of allocations) {
+          // Zero rows means someone else bought it, it was withdrawn, or it
+          // expired between the check above and now. Roll the whole thing
+          // back rather than partially selling.
+          const ok = await this.stockService.deductAllocation(
+            manager,
+            allocation,
+            { type: 'sale', id: sale.id },
+            userId,
+          );
+          if (!ok) {
+            throw rejectCheckout([
+              {
+                variant_id: item.variant_id,
+                unit_id: item.unit_id,
+                reason: 'stock_changed',
+                message:
+                  'This item changed while checking out. Nothing was sold — please retry.',
+                requested_quantity: item.quantity,
+              },
+            ]);
+          }
+        }
+
+        // One line per basket item. When a line straddles batches, batch_id
+        // is the one it mostly came from; the per-batch split is in
+        // stock_movements under this sale's id.
+        const primary = [...allocations].sort(
+          (a, b) => b.quantity - a.quantity,
+        )[0];
+        items.push(
+          manager.create(SaleItem, {
+            saleId: sale.id,
             productVariantId: variant.id,
+            batchId: primary.batch.id,
             // Snapshots: a later catalogue edit must not rewrite this invoice.
             brandNameSnapshot: variant.product.brandName,
             dosageFormSnapshot: variant.dosageForm,
@@ -193,12 +219,11 @@ export class SalesService {
             unitPrice: unit.price!,
             quantity: item.quantity,
             lineTotal: totals.lineTotals[index],
-          });
-        }),
-      });
-
-      const saved = await manager.save(sale);
-      return saved.id;
+          }),
+        );
+      }
+      await manager.save(items);
+      return sale.id;
     });
 
     return this.findOne(saleId);

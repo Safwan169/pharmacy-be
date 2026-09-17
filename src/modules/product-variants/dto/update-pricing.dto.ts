@@ -96,6 +96,16 @@ export class UpdatePricingDto {
   stock_quantity?: number;
 
   @ApiPropertyOptional({
+    example: 'Recounted shelf',
+    maxLength: 255,
+    description: 'Why the count changed. Stored on the adjustment movement.',
+  })
+  @IsString()
+  @MaxLength(255)
+  @IsOptional()
+  stock_note?: string;
+
+  @ApiPropertyOptional({
     type: UnitInputDto,
     isArray: true,
     description:
