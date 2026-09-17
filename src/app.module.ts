@@ -11,6 +11,7 @@ import { ProductVariantsModule } from './modules/product-variants/product-varian
 import { ProductsModule } from './modules/products/products.module';
 import { SalesModule } from './modules/sales/sales.module';
 import { StockModule } from './modules/stock/stock.module';
+import { SuppliersModule } from './modules/suppliers/suppliers.module';
 
 @Module({
   imports: [
@@ -28,6 +29,7 @@ import { StockModule } from './modules/stock/stock.module';
     ProductsModule,
     ProductVariantsModule,
     ImportModule,
+    SuppliersModule,
     StockModule,
     SalesModule,
     DashboardModule,

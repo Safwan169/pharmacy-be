@@ -3,6 +3,8 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { ProductVariant } from '../product-variants/entities/product-variant.entity';
 import { StockBatch } from './entities/stock-batch.entity';
 import { StockMovement } from './entities/stock-movement.entity';
+import { StockReceipt, StockReceiptItem } from './entities/stock-receipt.entity';
+import { ReceiptsService } from './receipts.service';
 import { ExpiryService } from './expiry.service';
 import { StockController } from './stock.controller';
 import { StockService } from './stock.service';
@@ -14,10 +16,16 @@ import { StockService } from './stock.service';
  */
 @Module({
   imports: [
-    TypeOrmModule.forFeature([StockBatch, StockMovement, ProductVariant]),
+    TypeOrmModule.forFeature([
+      StockBatch,
+      StockMovement,
+      StockReceipt,
+      StockReceiptItem,
+      ProductVariant,
+    ]),
   ],
   controllers: [StockController],
-  providers: [StockService, ExpiryService],
+  providers: [StockService, ExpiryService, ReceiptsService],
   exports: [StockService],
 })
 export class StockModule {}
