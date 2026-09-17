@@ -20,6 +20,7 @@ import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 // isolatedModules + emitDecoratorMetadata.
 import type { AuthenticatedUser } from '../../common/types/authenticated-user';
 import { AuthService } from './auth.service';
+import { ChangePasswordDto } from './dto/change-password.dto';
 import { LoginDto } from './dto/login.dto';
 import { LoginResponseDto } from './dto/login-response.dto';
 import { UserProfileDto } from './dto/user-profile.dto';
@@ -32,10 +33,10 @@ export class AuthController {
   @Post('login')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
-    summary: 'Log in as the admin user',
+    summary: 'Log in',
     description:
-      'Exchanges email + password for a JWT. The admin account is created by the ' +
-      '`seed:admin` script — there is no registration endpoint.',
+      'Exchanges email + password for a JWT carrying the role. The first owner ' +
+      'is created by `seed:admin`; the owner adds everyone else under /users.',
   })
   @ApiOkResponse({
     description: 'Credentials accepted; access token issued.',
@@ -64,6 +65,23 @@ export class AuthController {
     description: 'Missing, malformed, or expired token.',
   })
   me(@CurrentUser() user: AuthenticatedUser): UserProfileDto {
-    return { id: user.id, email: user.email, role: user.role };
+    return { id: user.id, email: user.email, name: user.name, role: user.role };
+  }
+
+  @Post('change-password')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Change your own password' })
+  @ApiUnauthorizedResponse({ description: 'Missing or invalid token.' })
+  async changePassword(
+    @Body() dto: ChangePasswordDto,
+    @CurrentUser() user: AuthenticatedUser,
+  ): Promise<void> {
+    await this.authService.changePassword(
+      user.id,
+      dto.current_password,
+      dto.new_password,
+    );
   }
 }

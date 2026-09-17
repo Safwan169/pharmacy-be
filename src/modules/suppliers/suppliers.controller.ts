@@ -23,7 +23,9 @@ import {
   ApiPaginatedResponse,
   PaginatedDto,
 } from '../../common/dto/paginated.dto';
+import { Roles } from '../../common/decorators/roles.decorator';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
+import { RolesGuard } from '../../common/guards/roles.guard';
 import {
   CreateSupplierDto,
   ListSuppliersQueryDto,
@@ -34,7 +36,8 @@ import { SuppliersService } from './suppliers.service';
 
 @ApiTags('suppliers')
 @ApiBearerAuth()
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, RolesGuard)
+@Roles('owner')
 @Controller('suppliers')
 export class SuppliersController {
   constructor(private readonly suppliersService: SuppliersService) {}

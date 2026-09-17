@@ -7,7 +7,9 @@ import {
   ApiTags,
   ApiUnauthorizedResponse,
 } from '@nestjs/swagger';
+import { Roles } from '../../common/decorators/roles.decorator';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
+import { RolesGuard } from '../../common/guards/roles.guard';
 import { DashboardService } from './dashboard.service';
 import { DashboardSummaryDto } from './dto/dashboard-summary.dto';
 import { LowStockItemDto } from './dto/low-stock-item.dto';
@@ -15,7 +17,7 @@ import { SummaryQueryDto } from './dto/summary-query.dto';
 
 @ApiTags('dashboard')
 @ApiBearerAuth()
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, RolesGuard)
 @Controller('dashboard')
 export class DashboardController {
   constructor(private readonly dashboardService: DashboardService) {}
@@ -39,6 +41,7 @@ export class DashboardController {
   }
 
   @Get('summary')
+  @Roles('owner')
   @ApiOperation({
     summary: 'Sales totals for a period',
     description:

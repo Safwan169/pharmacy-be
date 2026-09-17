@@ -1,4 +1,8 @@
-import { Injectable, UnauthorizedException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  UnauthorizedException,
+} from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { InjectRepository } from '@nestjs/typeorm';
 import * as bcrypt from 'bcrypt';
@@ -12,7 +16,10 @@ import { User } from './entities/user.entity';
 export interface JwtPayload {
   sub: number;
   email: string;
+  role: string;
 }
+
+export const BCRYPT_SALT_ROUNDS = 12;
 
 /**
  * A real bcrypt hash of a value nobody knows. Compared against when the email
@@ -44,9 +51,38 @@ export class AuthService {
     if (!user || !passwordMatches) {
       throw new UnauthorizedException('Invalid credentials');
     }
+    if (!user.isActive) {
+      throw new UnauthorizedException({
+        message: 'This account has been deactivated.',
+        reason: 'inactive_user',
+      });
+    }
 
-    const payload: JwtPayload = { sub: user.id, email: user.email };
+    const payload: JwtPayload = {
+      sub: user.id,
+      email: user.email,
+      role: user.role,
+    };
     return { access_token: await this.jwtService.signAsync(payload) };
+  }
+
+  /** Self-service password change; needs the current password. */
+  async changePassword(
+    userId: number,
+    currentPassword: string,
+    newPassword: string,
+  ): Promise<void> {
+    const user = await this.usersRepository.findOne({ where: { id: userId } });
+    if (!user) throw new UnauthorizedException();
+    const matches = await bcrypt.compare(currentPassword, user.passwordHash);
+    if (!matches) {
+      throw new BadRequestException({
+        message: 'The current password is wrong.',
+        reason: 'wrong_password',
+      });
+    }
+    user.passwordHash = await bcrypt.hash(newPassword, BCRYPT_SALT_ROUNDS);
+    await this.usersRepository.save(user);
   }
 
   /** Resolves the token subject against the database on every request, so a
@@ -55,10 +91,10 @@ export class AuthService {
     id: number,
   ): Promise<AuthenticatedUser | null> {
     const user = await this.usersRepository.findOne({ where: { id } });
-    if (!user) {
+    if (!user || !user.isActive) {
       return null;
     }
-    return { id: user.id, email: user.email, role: user.role };
+    return { id: user.id, email: user.email, name: user.name, role: user.role };
   }
 }
 

@@ -11,8 +11,8 @@ import { User } from '../../modules/auth/entities/user.entity';
 const BCRYPT_SALT_ROUNDS = 12;
 
 /**
- * Creates the single admin account from ADMIN_EMAIL / ADMIN_PASSWORD.
- * This is the only way a row ever enters `users` — the API has no registration.
+ * Creates the first owner account from ADMIN_EMAIL / ADMIN_PASSWORD.
+ * The owner adds further users through the API; there is no registration.
  * Idempotent: re-running it on an existing email is a no-op.
  */
 async function seedAdminUser(): Promise<void> {
@@ -36,18 +36,19 @@ async function seedAdminUser(): Promise<void> {
 
     const existing = await usersRepository.findOne({ where: { email } });
     if (existing) {
-      logger.log(`Admin user "${email}" already exists — nothing to do.`);
+      logger.log(`Owner "${email}" already exists — nothing to do.`);
       return;
     }
 
     const user = usersRepository.create({
       email,
       passwordHash: await bcrypt.hash(password, BCRYPT_SALT_ROUNDS),
-      role: 'admin',
+      role: 'owner',
+      name: 'Owner',
     });
     await usersRepository.save(user);
 
-    logger.log(`Created admin user "${email}".`);
+    logger.log(`Created owner "${email}".`);
   } finally {
     await appContext.close();
   }

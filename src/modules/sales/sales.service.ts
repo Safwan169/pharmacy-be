@@ -229,8 +229,14 @@ export class SalesService {
     return this.findOne(saleId);
   }
 
-  async findAll(query: ListSalesQueryDto): Promise<PaginatedDto<Sale>> {
+  async findAll(
+    query: ListSalesQueryDto,
+    onlyCashierId?: number,
+  ): Promise<PaginatedDto<Sale>> {
     const qb = this.baseQuery();
+    if (onlyCashierId !== undefined) {
+      qb.andWhere('sale.createdById = :cashierId', { cashierId: onlyCashierId });
+    }
 
     if (query.search !== undefined) {
       qb.andWhere('sale.invoiceNumber ILIKE :search', {
@@ -309,7 +315,7 @@ export class SalesService {
     return this.salesRepository
       .createQueryBuilder('sale')
       .leftJoin('sale.createdBy', 'cashier')
-      .addSelect(['cashier.id', 'cashier.email', 'cashier.role']);
+      .addSelect(['cashier.id', 'cashier.email', 'cashier.name', 'cashier.role']);
   }
 }
 

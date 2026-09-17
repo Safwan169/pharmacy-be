@@ -25,7 +25,9 @@ import {
   PaginatedDto,
 } from '../../common/dto/paginated.dto';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
+import { Roles } from '../../common/decorators/roles.decorator';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
+import { RolesGuard } from '../../common/guards/roles.guard';
 import type { AuthenticatedUser } from '../../common/types/authenticated-user';
 import { ListVariantsQueryDto } from './dto/list-variants-query.dto';
 import { UnitTemplatesQueryDto } from './dto/unit-templates-query.dto';
@@ -82,7 +84,8 @@ export class ProductVariantsController {
   }
 
   @Patch(':id/pricing')
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('owner')
   @ApiBearerAuth()
   @ApiOperation({
     summary: 'Set a variant’s sellable units, price and/or stock',
@@ -108,7 +111,8 @@ export class ProductVariantsController {
   }
 
   @Delete(':id')
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('owner')
   @ApiBearerAuth()
   @ApiOperation({
     summary: 'Withdraw a variant from the catalogue',
@@ -127,7 +131,8 @@ export class ProductVariantsController {
   }
 
   @Post(':id/restore')
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('owner')
   @ApiBearerAuth()
   @ApiOperation({
     summary: 'Put a withdrawn variant back in the catalogue',

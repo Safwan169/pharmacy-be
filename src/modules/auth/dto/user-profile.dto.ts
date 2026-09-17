@@ -8,6 +8,9 @@ export class UserProfileDto {
   @ApiProperty({ example: 'admin@example.com', format: 'email' })
   email!: string;
 
-  @ApiProperty({ example: 'admin' })
+  @ApiProperty({ example: 'Rahim', nullable: true })
+  name!: string | null;
+
+  @ApiProperty({ example: 'owner', enum: ['owner', 'cashier'] })
   role!: string;
 }

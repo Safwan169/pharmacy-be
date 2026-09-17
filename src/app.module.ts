@@ -12,6 +12,7 @@ import { ProductsModule } from './modules/products/products.module';
 import { SalesModule } from './modules/sales/sales.module';
 import { StockModule } from './modules/stock/stock.module';
 import { SuppliersModule } from './modules/suppliers/suppliers.module';
+import { UsersModule } from './modules/users/users.module';
 
 @Module({
   imports: [
@@ -24,6 +25,7 @@ import { SuppliersModule } from './modules/suppliers/suppliers.module';
     }),
     DatabaseModule,
     AuthModule,
+    UsersModule,
     ManufacturersModule,
     GenericsModule,
     ProductsModule,

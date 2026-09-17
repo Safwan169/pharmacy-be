@@ -18,7 +18,9 @@ import {
   ApiTags,
   ApiUnauthorizedResponse,
 } from '@nestjs/swagger';
+import { Roles } from '../../common/decorators/roles.decorator';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
+import { RolesGuard } from '../../common/guards/roles.guard';
 import { ImportResultDto } from './dto/import-result.dto';
 import { ImportService } from './import.service';
 
@@ -40,7 +42,8 @@ export class ImportController {
   constructor(private readonly importService: ImportService) {}
 
   @Post('csv')
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('owner')
   @ApiBearerAuth()
   @HttpCode(HttpStatus.OK)
   @UseInterceptors(

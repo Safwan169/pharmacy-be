@@ -27,7 +27,9 @@ import {
   PaginatedDto,
 } from '../../common/dto/paginated.dto';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
+import { Roles } from '../../common/decorators/roles.decorator';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
+import { RolesGuard } from '../../common/guards/roles.guard';
 import type { AuthenticatedUser } from '../../common/types/authenticated-user';
 import { CheckoutRejectedDto } from './dto/checkout-failure.dto';
 import { CheckoutDto } from './dto/checkout.dto';
@@ -41,7 +43,7 @@ import { SalesService } from './sales.service';
 
 @ApiTags('sales')
 @ApiBearerAuth()
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, RolesGuard)
 @Controller('sales')
 export class SalesController {
   constructor(
@@ -51,6 +53,7 @@ export class SalesController {
   ) {}
 
   @Post(':id/void')
+  @Roles('owner')
   @ApiOperation({
     summary: 'Void a sale made today',
     description:
@@ -130,8 +133,15 @@ export class SalesController {
       'its invoice. Line items are omitted here — fetch a single sale for those.',
   })
   @ApiPaginatedResponse(Sale, 'Sales, newest first.')
-  findAll(@Query() query: ListSalesQueryDto): Promise<PaginatedDto<Sale>> {
-    return this.salesService.findAll(query);
+  findAll(
+    @Query() query: ListSalesQueryDto,
+    @CurrentUser() user: AuthenticatedUser,
+  ): Promise<PaginatedDto<Sale>> {
+    // A cashier sees only what they rang up; the owner sees the whole shop.
+    return this.salesService.findAll(
+      query,
+      user.role === 'owner' ? undefined : user.id,
+    );
   }
 
   @Get(':id')

@@ -23,7 +23,9 @@ import {
   PaginatedDto,
 } from '../../common/dto/paginated.dto';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
+import { Roles } from '../../common/decorators/roles.decorator';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
+import { RolesGuard } from '../../common/guards/roles.guard';
 import type { AuthenticatedUser } from '../../common/types/authenticated-user';
 import {
   ExpiringItemDto,
@@ -44,7 +46,7 @@ import { StockService } from './stock.service';
 
 @ApiTags('stock')
 @ApiBearerAuth()
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, RolesGuard)
 @Controller('stock')
 export class StockController {
   constructor(
@@ -54,6 +56,7 @@ export class StockController {
   ) {}
 
   @Post('receipts')
+  @Roles('owner')
   @ApiOperation({
     summary: 'Receive a delivery',
     description:
@@ -74,6 +77,7 @@ export class StockController {
   }
 
   @Get('receipts')
+  @Roles('owner')
   @ApiOperation({ summary: 'List past deliveries' })
   @ApiPaginatedResponse(StockReceipt, 'Receipts, newest first.')
   listReceipts(
@@ -83,6 +87,7 @@ export class StockController {
   }
 
   @Get('receipts/:id')
+  @Roles('owner')
   @ApiOperation({ summary: 'One delivery with its lines' })
   @ApiOkResponse({ type: StockReceipt })
   @ApiNotFoundResponse({ description: 'No receipt with that id.' })
@@ -91,6 +96,7 @@ export class StockController {
   }
 
   @Get('movements')
+  @Roles('owner')
   @ApiOperation({
     summary: 'The stock ledger',
     description: 'Every change to stock, newest first. Filter by medicine, type or date.',
@@ -127,6 +133,7 @@ export class StockController {
   }
 
   @Post('batches/:id/write-off')
+  @Roles('owner')
   @ApiOperation({
     summary: 'Write off a batch',
     description:
