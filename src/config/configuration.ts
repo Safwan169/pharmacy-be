@@ -14,6 +14,7 @@ export interface AppConfiguration {
     password: string;
     name: string;
     synchronize: boolean;
+    ssl: boolean;
   };
   jwt: {
     secret: string;
@@ -45,6 +46,8 @@ export const validationSchema = Joi.object({
   // Lets TypeORM create/update the schema from the entities. Convenient in
   // development; must stay false in production, where migrations own the schema.
   DB_SYNCHRONIZE: Joi.boolean().default(false),
+  // Hosted Postgres (Render, Neon, Supabase…) only accepts TLS connections.
+  DB_SSL: Joi.boolean().default(false),
 
   // Length isn't enforced so any value works locally, but this must be a long
   // random string in production — it is the only thing protecting token forgery.
@@ -77,6 +80,7 @@ export default (): AppConfiguration => ({
     password: process.env.DB_PASSWORD as string,
     name: process.env.DB_NAME as string,
     synchronize: process.env.DB_SYNCHRONIZE === 'true',
+    ssl: process.env.DB_SSL === 'true',
   },
   jwt: {
     secret: process.env.JWT_SECRET as string,

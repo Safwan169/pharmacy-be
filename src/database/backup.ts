@@ -11,6 +11,8 @@ export interface BackupOptions {
   username: string;
   password: string;
   database: string;
+  /** Hosted Postgres needs TLS; passed to pg_dump/pg_restore as PGSSLMODE. */
+  ssl?: boolean;
   /** Directory for dump files. Created if missing. */
   dir: string;
   /** Dumps older than this are deleted after a successful new one. */
@@ -50,7 +52,7 @@ export async function runBackup(options: BackupOptions): Promise<BackupFile> {
       `--dbname=${options.database}`,
       `--file=${file}`,
     ],
-    { env: { ...process.env, PGPASSWORD: options.password }, maxBuffer: 64 * 1024 * 1024 },
+    { env: { ...process.env, PGPASSWORD: options.password, PGSSLMODE: options.ssl ? 'require' : 'prefer' }, maxBuffer: 64 * 1024 * 1024 },
   );
 
   pruneOld(options.dir, options.keepDays);
@@ -75,7 +77,7 @@ export async function runRestore(options: BackupOptions, file: string): Promise<
       `--dbname=${options.database}`,
       resolved,
     ],
-    { env: { ...process.env, PGPASSWORD: options.password }, maxBuffer: 64 * 1024 * 1024 },
+    { env: { ...process.env, PGPASSWORD: options.password, PGSSLMODE: options.ssl ? 'require' : 'prefer' }, maxBuffer: 64 * 1024 * 1024 },
   );
 }
 
@@ -115,6 +117,7 @@ export function optionsFromEnv(): BackupOptions {
     username: process.env.DB_USERNAME ?? 'postgres',
     password: process.env.DB_PASSWORD ?? '',
     database: process.env.DB_NAME ?? 'pharmacy_db',
+    ssl: process.env.DB_SSL === 'true',
     dir: process.env.BACKUP_DIR ?? path.resolve(process.cwd(), 'backups'),
     keepDays: Number(process.env.BACKUP_KEEP_DAYS ?? 30),
     pgDumpPath: process.env.PG_DUMP_PATH || undefined,

@@ -21,6 +21,10 @@ import { TypeOrmModule } from '@nestjs/typeorm';
         database: configService.getOrThrow<string>('database.name'),
         autoLoadEntities: true,
         synchronize: configService.getOrThrow<boolean>('database.synchronize'),
+        // Managed providers present certificates signed by their own CA.
+        ssl: configService.getOrThrow<boolean>('database.ssl')
+          ? { rejectUnauthorized: false }
+          : false,
       }),
     }),
   ],
