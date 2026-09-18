@@ -49,11 +49,29 @@ export class ProductVariantsService {
   ): Promise<PaginatedDto<ProductVariant>> {
     const qb = this.baseQuery();
 
-    if (query.search !== undefined) {
+    const term = query.search?.trim();
+    if (term) {
+      // Brand matches come before ingredient matches, and "Napa" itself before
+      // "Lonapam" or anything containing "Napadisylate" — otherwise the
+      // medicine typed at the counter can fall off the first page.
       qb.andWhere(
         '(product.brandName ILIKE :search OR generic.name ILIKE :search)',
-        { search: `%${query.search}%` },
-      );
+        { search: `%${term}%` },
+      )
+        .addSelect(
+          `CASE
+            WHEN product.brandName ILIKE :exact THEN 0
+            WHEN product.brandName ILIKE :prefix THEN 1
+            WHEN product.brandName ILIKE :search THEN 2
+            ELSE 3
+          END`,
+          'search_rank',
+        )
+        .setParameters({ exact: term, prefix: `${term}%` })
+        .orderBy('search_rank', 'ASC')
+        .addOrderBy('product.brandName', 'ASC');
+    } else {
+      qb.orderBy('product.brandName', 'ASC');
     }
     if (query.manufacturer_id !== undefined) {
       qb.andWhere('product.manufacturerId = :manufacturerId', {
@@ -88,8 +106,7 @@ export class ProductVariantsService {
       qb.andWhere('variant.isActive = true');
     }
 
-    qb.orderBy('product.brandName', 'ASC')
-      .addOrderBy('variant.id', 'ASC')
+    qb.addOrderBy('variant.id', 'ASC')
       .addOrderBy('unit.sortOrder', 'ASC')
       .skip(query.skip)
       .take(query.limit);
