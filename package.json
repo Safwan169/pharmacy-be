@@ -16,6 +16,7 @@
     "import:csv": "ts-node -r tsconfig-paths/register src/database/seeds/import-medicines.seed.ts",
     "backup": "ts-node -r tsconfig-paths/register src/database/seeds/backup.script.ts",
     "restore": "ts-node -r tsconfig-paths/register src/database/seeds/backup.script.ts --restore",
+    "deploy:prepare": "typeorm -d dist/database/data-source.js migration:run && node dist/database/seeds/admin-user.seed.js && node dist/database/seeds/import-medicines.seed.js --if-empty",
     "typeorm": "typeorm-ts-node-commonjs -d src/database/data-source.ts",
     "migration:run": "npm run typeorm -- migration:run",
     "migration:revert": "npm run typeorm -- migration:revert",

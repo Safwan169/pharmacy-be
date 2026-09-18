@@ -4,6 +4,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { AppModule } from '../../app.module';
 import { ImportService } from '../../modules/import/import.service';
+import { DataSource } from 'typeorm';
 
 const DEFAULT_CSV = path.join(process.cwd(), 'src', 'docs', 'medicine.csv');
 
@@ -11,11 +12,16 @@ const DEFAULT_CSV = path.join(process.cwd(), 'src', 'docs', 'medicine.csv');
  * Loads the medicine catalogue from disk. Preferred over the HTTP upload for the
  * initial ~21.7k-row load, which takes long enough to risk an HTTP timeout.
  *
- * Usage: `npm run import:csv [-- path/to/medicine.csv]`
+ * Usage: `npm run import:csv [-- path/to/medicine.csv] [--if-empty]`
+ *
+ * `--if-empty` makes it a no-op once the catalogue has rows, so it can sit in
+ * a deploy hook without re-importing 21k lines on every release.
  */
 async function importMedicines(): Promise<void> {
   const logger = new Logger('MedicineImport');
-  const csvPath = process.argv[2] ?? DEFAULT_CSV;
+  const args = process.argv.slice(2);
+  const ifEmpty = args.includes('--if-empty');
+  const csvPath = args.find((a) => !a.startsWith('--')) ?? DEFAULT_CSV;
 
   if (!fs.existsSync(csvPath)) {
     logger.error(`CSV not found at ${csvPath}`);
@@ -28,6 +34,15 @@ async function importMedicines(): Promise<void> {
   });
 
   try {
+    if (ifEmpty) {
+      const [{ count }] = (await appContext
+        .get(DataSource)
+        .query('SELECT COUNT(*)::int AS count FROM product_variants')) as [{ count: number }];
+      if (count > 0) {
+        logger.log(`Catalogue already holds ${count} variants — skipping import.`);
+        return;
+      }
+    }
     logger.log(`Importing from ${csvPath}`);
     const result = await appContext
       .get(ImportService)
