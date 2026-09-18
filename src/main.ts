@@ -10,7 +10,12 @@ const SWAGGER_PATH = 'api/docs';
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
 
-  app.enableCors();
+  const configService = app.get(ConfigService);
+  const corsOrigins = configService.getOrThrow<string[]>('corsOrigins');
+  app.enableCors({
+    origin: corsOrigins.length > 0 ? corsOrigins : true,
+    credentials: true,
+  });
   app.useGlobalPipes(
     new ValidationPipe({
       whitelist: true,

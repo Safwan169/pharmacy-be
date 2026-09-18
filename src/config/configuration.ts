@@ -7,6 +7,8 @@ import * as Joi from 'joi';
 export interface AppConfiguration {
   nodeEnv: string;
   port: number;
+  /** Empty means every origin is allowed. */
+  corsOrigins: string[];
   database: {
     host: string;
     port: number;
@@ -49,6 +51,10 @@ export const validationSchema = Joi.object({
   // Hosted Postgres (Render, Neon, Supabase…) only accepts TLS connections.
   DB_SSL: Joi.boolean().default(false),
 
+  // Comma-separated browser origins allowed to call the API, e.g.
+  // "https://shop.example.com,http://localhost:3001". Empty = any origin.
+  CORS_ORIGIN: Joi.string().allow('').default(''),
+
   // Length isn't enforced so any value works locally, but this must be a long
   // random string in production — it is the only thing protecting token forgery.
   JWT_SECRET: Joi.string().required(),
@@ -73,6 +79,10 @@ export const validationSchema = Joi.object({
 export default (): AppConfiguration => ({
   nodeEnv: process.env.NODE_ENV as string,
   port: Number(process.env.PORT),
+  corsOrigins: (process.env.CORS_ORIGIN ?? '')
+    .split(',')
+    .map((o) => o.trim())
+    .filter(Boolean),
   database: {
     host: process.env.DB_HOST as string,
     port: Number(process.env.DB_PORT),
