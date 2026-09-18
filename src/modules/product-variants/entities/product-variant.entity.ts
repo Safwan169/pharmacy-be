@@ -1,5 +1,6 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import {
+  Check,
   Column,
   CreateDateColumn,
   Entity,
@@ -27,6 +28,7 @@ import { VariantUnit } from './variant-unit.entity';
 // Partial index backing the admin's "needs pricing" worklist. Declared here as
 // well as in the migration so `migration:generate` doesn't try to drop it.
 @Index('idx_variants_price_null', ['id'], { where: '"price" IS NULL' })
+@Check('chk_variants_reorder_level', '"reorder_level" IS NULL OR "reorder_level" >= 0')
 export class ProductVariant {
   @ApiProperty({ example: 1 })
   @PrimaryGeneratedColumn()
@@ -136,6 +138,16 @@ export class ProductVariant {
   @ApiPropertyOptional({ nullable: true })
   @Column({ name: 'price_updated_at', type: 'timestamptz', nullable: true })
   priceUpdatedAt!: Date | null;
+
+  @ApiPropertyOptional({
+    example: 50,
+    nullable: true,
+    description:
+      'Restock when sellable stock (base units) drops below this. Null means ' +
+      'use the shop-wide low_stock_threshold setting.',
+  })
+  @Column({ name: 'reorder_level', type: 'integer', nullable: true })
+  reorderLevel!: number | null;
 
   @ApiProperty({
     example: true,

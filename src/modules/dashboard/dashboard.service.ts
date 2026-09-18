@@ -101,7 +101,8 @@ export class DashboardService {
       // Expired batches don't count as stock you can sell, so a shelf full of
       // expired strips still shows up here.
       .addSelect(SELLABLE_STOCK_SQL, 'sellable')
-      .andWhere(`${SELLABLE_STOCK_SQL} < :threshold`, {
+      // A SKU's own reorder level wins; the shop-wide number is the fallback.
+      .andWhere(`${SELLABLE_STOCK_SQL} < COALESCE(variant.reorderLevel, :threshold)`, {
         threshold: await this.settingsService.lowStockThreshold(),
       })
       // A withdrawn SKU is not meant to be restocked, so it must not sit in the

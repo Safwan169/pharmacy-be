@@ -13,6 +13,8 @@ import {
 import {
   ApiBadRequestResponse,
   ApiBearerAuth,
+  ApiConflictResponse,
+  ApiCreatedResponse,
   ApiNotFoundResponse,
   ApiOkResponse,
   ApiOperation,
@@ -32,6 +34,7 @@ import type { AuthenticatedUser } from '../../common/types/authenticated-user';
 import { ListVariantsQueryDto } from './dto/list-variants-query.dto';
 import { UnitTemplatesQueryDto } from './dto/unit-templates-query.dto';
 import { UpdatePricingDto } from './dto/update-pricing.dto';
+import { CreateVariantDto } from './dto/create-variant.dto';
 import { ProductVariant } from './entities/product-variant.entity';
 import { ProductVariantsService } from './product-variants.service';
 
@@ -55,6 +58,26 @@ export class ProductVariantsController {
     @Query() query: ListVariantsQueryDto,
   ): Promise<PaginatedDto<ProductVariant>> {
     return this.variantsService.findAll(query);
+  }
+
+  @Post()
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('owner')
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary: 'Add a medicine by hand',
+    description:
+      'For items the imported catalogue lacks. Company, ingredient and brand ' +
+      'line are reused when they already exist. The new SKU has no units, ' +
+      'price or stock yet — set those with PATCH /variants/:id/pricing.',
+  })
+  @ApiCreatedResponse({ type: ProductVariant })
+  @ApiConflictResponse({
+    description: 'That brand, strength and form already exists (reason: variant_exists).',
+  })
+  @ApiUnauthorizedResponse()
+  create(@Body() dto: CreateVariantDto): Promise<ProductVariant> {
+    return this.variantsService.create(dto);
   }
 
   @Get('unit-templates')

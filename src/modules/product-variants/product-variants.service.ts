@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ConflictException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
@@ -19,7 +20,11 @@ import {
   unitTemplate,
 } from './base-unit';
 import { ListVariantsQueryDto } from './dto/list-variants-query.dto';
-import { UnitInputDto, UpdatePricingDto } from './dto/update-pricing.dto';
+import { UpdatePricingDto, UnitInputDto } from './dto/update-pricing.dto';
+import { CreateVariantDto } from './dto/create-variant.dto';
+import { Product } from '../products/entities/product.entity';
+import { Manufacturer } from '../manufacturers/entities/manufacturer.entity';
+import { Generic } from '../generics/entities/generic.entity';
 import { ProductVariant } from './entities/product-variant.entity';
 import { VariantUnit } from './entities/variant-unit.entity';
 
@@ -115,6 +120,99 @@ export class ProductVariantsService {
     return paginate(data, total, query.page, query.limit);
   }
 
+  /**
+   * Adds a medicine by hand. Company, ingredient and brand line are reused
+   * when they already exist (matched ignoring case and surrounding spaces),
+   * so the manual path can't fork the catalogue the importer maintains.
+   */
+  async create(dto: CreateVariantDto): Promise<ProductVariant> {
+    const brandName = dto.brand_name.trim();
+    const manufacturerName = dto.manufacturer_name.trim();
+    const genericName = dto.generic_name?.trim() || null;
+    const dosageForm = dto.dosage_form.trim();
+    const strength = dto.strength?.trim() || null;
+
+    const id = await this.dataSource.transaction(async (manager) => {
+      let manufacturer = await manager
+        .createQueryBuilder(Manufacturer, 'm')
+        .where('LOWER(m.name) = LOWER(:name)', { name: manufacturerName })
+        .getOne();
+      if (!manufacturer) {
+        manufacturer = await manager.save(
+          manager.create(Manufacturer, { name: manufacturerName }),
+        );
+      }
+
+      let generic: Generic | null = null;
+      if (genericName) {
+        generic = await manager
+          .createQueryBuilder(Generic, 'g')
+          .where('LOWER(g.name) = LOWER(:name)', { name: genericName })
+          .getOne();
+        if (!generic) {
+          generic = await manager.save(
+            manager.create(Generic, { name: genericName }),
+          );
+        }
+      }
+
+      let product = await manager
+        .createQueryBuilder(Product, 'p')
+        .where('LOWER(p.brandName) = LOWER(:name)', { name: brandName })
+        .andWhere('p.manufacturerId = :manufacturerId', {
+          manufacturerId: manufacturer.id,
+        })
+        .getOne();
+      if (!product) {
+        product = await manager.save(
+          manager.create(Product, {
+            brandName,
+            manufacturerId: manufacturer.id,
+            type: dto.type ?? 'allopathic',
+          }),
+        );
+      }
+
+      const duplicate = await manager
+        .createQueryBuilder(ProductVariant, 'v')
+        .where('v.productId = :productId', { productId: product.id })
+        .andWhere('LOWER(v.dosageForm) = LOWER(:form)', { form: dosageForm })
+        .andWhere(
+          strength === null
+            ? 'v.strength IS NULL'
+            : 'LOWER(v.strength) = LOWER(:strength)',
+          { strength },
+        )
+        .getOne();
+      if (duplicate) {
+        throw new ConflictException({
+          message: `${brandName} ${strength ?? ''} ${dosageForm} already exists`,
+          reason: 'variant_exists',
+          variant_id: duplicate.id,
+        });
+      }
+
+      const variant = await manager.save(
+        manager.create(ProductVariant, {
+          productId: product.id,
+          genericId: generic?.id ?? null,
+          dosageForm,
+          strength,
+          slug: null,
+          legacyBrandId: null,
+          baseUnit: baseUnitForDosageForm(dosageForm),
+          packSize: dto.pack_size ?? null,
+          price: null,
+          stockQuantity: null,
+          isActive: true,
+        }),
+      );
+      return variant.id;
+    });
+
+    return this.findOne(id);
+  }
+
   async findOne(id: number): Promise<ProductVariant> {
     const variant = await this.baseQuery()
       .where('variant.id = :id', { id })
@@ -147,10 +245,11 @@ export class ProductVariantsService {
     if (
       dto.price === undefined &&
       dto.stock_quantity === undefined &&
-      dto.units === undefined
+      dto.units === undefined &&
+      dto.reorder_level === undefined
     ) {
       throw new BadRequestException(
-        'Send at least one of price, stock_quantity or units.',
+        'Send at least one of price, stock_quantity, units or reorder_level.',
       );
     }
     if (dto.units !== undefined) {
@@ -175,6 +274,9 @@ export class ProductVariantsService {
       }
 
       const patch: Partial<ProductVariant> = {};
+      if (dto.reorder_level !== undefined) {
+        patch.reorderLevel = dto.reorder_level;
+      }
       if (priceTouched) {
         const units = await manager.find(VariantUnit, {
           where: { variantId: id },

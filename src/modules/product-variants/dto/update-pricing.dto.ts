@@ -13,6 +13,7 @@ import {
   Max,
   MaxLength,
   Min,
+  ValidateIf,
   ValidateNested,
 } from 'class-validator';
 
@@ -104,6 +105,22 @@ export class UpdatePricingDto {
   @MaxLength(255)
   @IsOptional()
   stock_note?: string;
+
+  @ApiPropertyOptional({
+    example: 50,
+    nullable: true,
+    minimum: 0,
+    description:
+      'Restock below this many base units. Send null to fall back to the ' +
+      'shop-wide setting.',
+  })
+  @ValidateIf((_, value) => value !== null)
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  @Max(1_000_000)
+  @IsOptional()
+  reorder_level?: number | null;
 
   @ApiPropertyOptional({
     type: UnitInputDto,
