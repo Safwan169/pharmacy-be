@@ -66,6 +66,16 @@ export class ReportsService {
       params,
     )) as Record<string, string>[];
 
+    // Money handed to suppliers today leaves the drawer just like a refund.
+    const [supplierPaid] = (await this.dataSource.query(
+      `SELECT
+         COALESCE(SUM(sp.amount) FILTER (WHERE sp.method = 'cash'), 0)  AS cash,
+         COALESCE(SUM(sp.amount) FILTER (WHERE sp.method = 'bkash'), 0) AS bkash
+       FROM supplier_payments sp
+       WHERE sp.created_at >= $1 AND sp.created_at < $2 ${onlyCashierId === undefined ? '' : 'AND sp.created_by = $3'}`,
+      params,
+    )) as Record<string, string>[];
+
     const topItems = (await this.dataSource.query(
       `SELECT si.product_variant_id AS variant_id,
               MAX(si.brand_name_snapshot || COALESCE(' ' || si.strength_snapshot, '')) AS name,
@@ -106,7 +116,10 @@ export class ReportsService {
       by_method: { cash: n(totals.cash), bkash: n(totals.bkash), due: n(totals.due) },
       refunds_by_method: { cash: n(refunds.cash), bkash: n(refunds.bkash), due_adjust: n(refunds.due_adjust) },
       due_collected: { cash: n(collected.cash), bkash: n(collected.bkash) },
-      cash_in_drawer_expected: round2(n(totals.cash) + n(collected.cash) - n(refunds.cash)),
+      supplier_paid: { cash: n(supplierPaid.cash), bkash: n(supplierPaid.bkash) },
+      cash_in_drawer_expected: round2(
+        n(totals.cash) + n(collected.cash) - n(refunds.cash) - n(supplierPaid.cash),
+      ),
       voided_count: n(totals.voided_count),
       top_items: topItems.map((r) => ({
         variant_id: n(r.variant_id),

@@ -1,3 +1,4 @@
+import { Type } from 'class-transformer';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import {
   IsBoolean,
@@ -6,6 +7,8 @@ import {
   IsString,
   MaxLength,
   MinLength,
+  IsNumber,
+  Min,
 } from 'class-validator';
 import { PaginationQueryDto } from '../../../common/dto/pagination-query.dto';
 
@@ -20,6 +23,40 @@ export class ListSuppliersQueryDto extends PaginationQueryDto {
   @IsIn(['active', 'inactive', 'all'])
   @IsOptional()
   status?: 'active' | 'inactive' | 'all';
+}
+
+export class CreateSupplierPaymentDto {
+  @ApiProperty({ example: 5000, minimum: 0.01 })
+  @Type(() => Number)
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0.01)
+  amount!: number;
+
+  @ApiProperty({ enum: ['cash', 'bkash'] })
+  @IsIn(['cash', 'bkash'])
+  method!: 'cash' | 'bkash';
+
+  @ApiPropertyOptional({ maxLength: 50, description: 'bKash TrxID, cheque number…' })
+  @IsString()
+  @MaxLength(50)
+  @IsOptional()
+  reference?: string;
+
+  @ApiPropertyOptional({ maxLength: 255 })
+  @IsString()
+  @MaxLength(255)
+  @IsOptional()
+  note?: string;
+}
+
+export class DueSupplierDto {
+  @ApiProperty() id!: number;
+  @ApiProperty() name!: string;
+  @ApiProperty({ nullable: true }) phone!: string | null;
+  @ApiProperty() due_balance!: number;
+  @ApiProperty({ nullable: true, description: 'Date of the oldest delivery still unpaid.' })
+  oldest_due_at!: string | null;
+  @ApiProperty() open_receipts!: number;
 }
 
 export class CreateSupplierDto {

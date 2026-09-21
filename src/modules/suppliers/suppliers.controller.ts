@@ -26,7 +26,13 @@ import {
 import { Roles } from '../../common/decorators/roles.decorator';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
+import { CurrentUser } from '../../common/decorators/current-user.decorator';
+import type { AuthenticatedUser } from '../../common/types/authenticated-user';
+import { SupplierPayment } from './entities/supplier-payment.entity';
+import { StockReceipt } from '../stock/entities/stock-receipt.entity';
 import {
+  CreateSupplierPaymentDto,
+  DueSupplierDto,
   CreateSupplierDto,
   ListSuppliersQueryDto,
   UpdateSupplierDto,
@@ -48,6 +54,32 @@ export class SuppliersController {
   @ApiUnauthorizedResponse({ description: 'Missing or invalid token.' })
   findAll(@Query() query: ListSuppliersQueryDto): Promise<PaginatedDto<Supplier>> {
     return this.suppliersService.findAll(query);
+  }
+
+  @Get('due')
+  @ApiOperation({ summary: 'Suppliers the shop still owes, oldest debt first' })
+  @ApiOkResponse({ type: DueSupplierDto, isArray: true })
+  dueList(): Promise<DueSupplierDto[]> {
+    return this.suppliersService.dueList();
+  }
+
+  @Get(':id/history')
+  @ApiOperation({ summary: "A supplier's deliveries (with paid/due) and payments" })
+  history(
+    @Param('id', ParseIntPipe) id: number,
+  ): Promise<{ receipts: StockReceipt[]; payments: SupplierPayment[] }> {
+    return this.suppliersService.history(id);
+  }
+
+  @Post(':id/payments')
+  @ApiOperation({ summary: 'Pay a supplier against the balance owed' })
+  @ApiCreatedResponse({ type: SupplierPayment })
+  recordPayment(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: CreateSupplierPaymentDto,
+    @CurrentUser() user: AuthenticatedUser,
+  ): Promise<SupplierPayment> {
+    return this.suppliersService.recordPayment(id, dto, user.id);
   }
 
   @Get(':id')

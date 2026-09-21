@@ -64,6 +64,20 @@ export class StockReceipt {
   })
   totalCost!: number;
 
+  @ApiProperty({
+    example: 5000,
+    description: 'Paid so far, at the delivery and through later supplier payments.',
+  })
+  @Column({
+    name: 'paid_amount',
+    type: 'numeric',
+    precision: 12,
+    scale: 2,
+    default: 0,
+    transformer: numericTransformer,
+  })
+  paidAmount!: number;
+
   @ApiPropertyOptional({ nullable: true })
   @Column({ type: 'varchar', length: 255, nullable: true })
   note!: string | null;

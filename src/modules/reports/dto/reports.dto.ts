@@ -63,7 +63,8 @@ export class DailyClosingDto {
   @ApiProperty({ type: MethodBreakdownDto }) by_method!: MethodBreakdownDto;
   @ApiProperty({ description: 'Refunds paid out, by method.' }) refunds_by_method!: { cash: number; bkash: number; due_adjust: number };
   @ApiProperty({ description: 'Due balances collected today, by method.' }) due_collected!: { cash: number; bkash: number };
-  @ApiProperty({ description: 'Cash sales + cash due collections - cash refunds.' }) cash_in_drawer_expected!: number;
+  @ApiProperty({ description: 'Paid to suppliers today (at deliveries and against balances), by method.' }) supplier_paid!: { cash: number; bkash: number };
+  @ApiProperty({ description: 'Cash sales + cash due collections - cash refunds - cash paid to suppliers.' }) cash_in_drawer_expected!: number;
   @ApiProperty() voided_count!: number;
   @ApiProperty({ type: ClosingTopItemDto, isArray: true }) top_items!: ClosingTopItemDto[];
   @ApiProperty({ type: ClosingCashierDto, isArray: true }) cashier_breakdown!: ClosingCashierDto[];

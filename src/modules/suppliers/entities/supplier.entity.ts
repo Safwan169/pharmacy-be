@@ -7,6 +7,7 @@ import {
   Unique,
   UpdateDateColumn,
 } from 'typeorm';
+import { numericTransformer } from '../../../common/transformers/numeric.transformer';
 
 /** Who the shop buys from. Referenced by stock receipts. */
 @Entity({ name: 'suppliers' })
@@ -29,6 +30,20 @@ export class Supplier {
   address!: string | null;
 
   @ApiProperty({ example: true })
+  @ApiProperty({
+    example: 12500,
+    description: 'What the shop still owes this supplier across all deliveries.',
+  })
+  @Column({
+    name: 'due_balance',
+    type: 'numeric',
+    precision: 12,
+    scale: 2,
+    default: 0,
+    transformer: numericTransformer,
+  })
+  dueBalance!: number;
+
   @Column({ name: 'is_active', type: 'boolean', default: true })
   isActive!: boolean;
 

@@ -92,6 +92,24 @@ export class CreateReceiptDto {
   @IsOptional()
   note?: string;
 
+  @ApiPropertyOptional({
+    example: 5000,
+    minimum: 0,
+    description:
+      'Paid to the supplier at the delivery. Omit to record the delivery as ' +
+      'fully paid; send 0 to put the whole amount on the supplier\'s account.',
+  })
+  @Type(() => Number)
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0)
+  @IsOptional()
+  paid_amount?: number;
+
+  @ApiPropertyOptional({ enum: ['cash', 'bkash'], default: 'cash' })
+  @IsIn(['cash', 'bkash'])
+  @IsOptional()
+  paid_method?: 'cash' | 'bkash';
+
   @ApiProperty({ type: ReceiptLineDto, isArray: true, minItems: 1 })
   @IsArray()
   @ArrayNotEmpty()

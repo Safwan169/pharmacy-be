@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Injectable,
   NotFoundException,
   UnprocessableEntityException,
@@ -18,8 +19,11 @@ import {
 import { StockMovement } from './entities/stock-movement.entity';
 import { StockReceipt, StockReceiptItem } from './entities/stock-receipt.entity';
 import { StockService } from './stock.service';
+import { Supplier } from '../suppliers/entities/supplier.entity';
+import { SupplierPayment } from '../suppliers/entities/supplier-payment.entity';
 
 const DOCUMENT_PREFIX = 'GRN';
+const PAYMENT_PREFIX = 'SPY';
 
 /** Today as YYYY-MM-DD in the pharmacy's zone, for the "not in the past" check. */
 function todayInDhaka(): string {
@@ -166,11 +170,56 @@ export class ReceiptsService {
         );
       }
 
+      // Payment at the door. Nothing sent = paid in full (a cash purchase);
+      // less than the total goes on the supplier's account, which therefore
+      // needs a supplier to put it on.
+      const paidMinor =
+        dto.paid_amount === undefined ? totalMinor : toMinorUnits(dto.paid_amount);
+      if (paidMinor > totalMinor) {
+        throw new BadRequestException({
+          message: `Paid amount exceeds the delivery total of ${fromMinorUnits(totalMinor).toFixed(2)}.`,
+          reason: 'overpayment',
+        });
+      }
+      const dueMinor = totalMinor - paidMinor;
+      if (dueMinor > 0 && dto.supplier_id === undefined) {
+        throw new BadRequestException({
+          message: 'Pick a supplier to put the unpaid amount on their account.',
+          reason: 'supplier_required',
+        });
+      }
+
       await manager.update(
         StockReceipt,
         { id: receipt.id },
-        { totalCost: fromMinorUnits(totalMinor) },
+        { totalCost: fromMinorUnits(totalMinor), paidAmount: fromMinorUnits(paidMinor) },
       );
+
+      let balanceAfter = 0;
+      if (dto.supplier_id !== undefined) {
+        const supplier = await manager.findOne(Supplier, {
+          where: { id: dto.supplier_id },
+          lock: { mode: 'pessimistic_write' },
+        });
+        if (!supplier) throw new NotFoundException(`Supplier ${dto.supplier_id} not found`);
+        balanceAfter = fromMinorUnits(toMinorUnits(supplier.dueBalance) + dueMinor);
+        await manager.update(Supplier, { id: supplier.id }, { dueBalance: balanceAfter });
+      }
+      if (paidMinor > 0) {
+        await manager.save(
+          manager.create(SupplierPayment, {
+            supplierId: dto.supplier_id ?? null,
+            receiptId: receipt.id,
+            paymentNumber: await nextDocumentNumber(manager, PAYMENT_PREFIX),
+            amount: fromMinorUnits(paidMinor),
+            method: dto.paid_method ?? 'cash',
+            reference: null,
+            note: receipt.receiptNumber,
+            balanceAfter,
+            createdById: userId,
+          }),
+        );
+      }
       return receipt.id;
     });
 
