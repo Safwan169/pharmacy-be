@@ -35,6 +35,7 @@ import { ListVariantsQueryDto } from './dto/list-variants-query.dto';
 import { UnitTemplatesQueryDto } from './dto/unit-templates-query.dto';
 import { UpdatePricingDto } from './dto/update-pricing.dto';
 import { CreateVariantDto } from './dto/create-variant.dto';
+import { BulkPriceDto, BulkPricePreviewDto } from './dto/bulk-price.dto';
 import { ProductVariant } from './entities/product-variant.entity';
 import { ProductVariantsService } from './product-variants.service';
 
@@ -78,6 +79,25 @@ export class ProductVariantsController {
   @ApiUnauthorizedResponse()
   create(@Body() dto: CreateVariantDto): Promise<ProductVariant> {
     return this.variantsService.create(dto);
+  }
+
+  @Post('bulk-price')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('owner')
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary: 'Change many prices at once (preview by default)',
+    description:
+      'Filters to a company, ingredient or search term, then moves every ' +
+      'priced unit by a percentage or a fixed amount. dry_run (default true) ' +
+      'only reports what would change.',
+  })
+  @ApiOkResponse({ type: BulkPricePreviewDto })
+  bulkPrice(
+    @Body() dto: BulkPriceDto,
+    @CurrentUser() user: AuthenticatedUser,
+  ): Promise<BulkPricePreviewDto> {
+    return this.variantsService.bulkPrice(dto, user.id);
   }
 
   @Get('unit-templates')
@@ -149,8 +169,11 @@ export class ProductVariantsController {
   @ApiOkResponse({ description: 'Variant withdrawn.', type: ProductVariant })
   @ApiUnauthorizedResponse({ description: 'Missing or invalid token.' })
   @ApiNotFoundResponse({ description: 'No variant with that id.' })
-  remove(@Param('id', ParseIntPipe) id: number): Promise<ProductVariant> {
-    return this.variantsService.deactivate(id);
+  remove(
+    @Param('id', ParseIntPipe) id: number,
+    @CurrentUser() user: AuthenticatedUser,
+  ): Promise<ProductVariant> {
+    return this.variantsService.deactivate(id, user.id);
   }
 
   @Post(':id/restore')
@@ -166,7 +189,10 @@ export class ProductVariantsController {
   @ApiOkResponse({ description: 'Variant restored.', type: ProductVariant })
   @ApiUnauthorizedResponse({ description: 'Missing or invalid token.' })
   @ApiNotFoundResponse({ description: 'No variant with that id.' })
-  restore(@Param('id', ParseIntPipe) id: number): Promise<ProductVariant> {
-    return this.variantsService.restore(id);
+  restore(
+    @Param('id', ParseIntPipe) id: number,
+    @CurrentUser() user: AuthenticatedUser,
+  ): Promise<ProductVariant> {
+    return this.variantsService.restore(id, user.id);
   }
 }

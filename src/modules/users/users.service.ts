@@ -3,6 +3,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
+import { AuditService } from '../audit/audit.service';
 import { InjectRepository } from '@nestjs/typeorm';
 import * as bcrypt from 'bcrypt';
 import { Repository } from 'typeorm';
@@ -21,6 +22,7 @@ export class UsersService {
   constructor(
     @InjectRepository(User)
     private readonly usersRepository: Repository<User>,
+    private readonly auditService: AuditService,
   ) {}
 
   async findAll(): Promise<UserDto[]> {
@@ -30,7 +32,7 @@ export class UsersService {
     return users.map(toDto);
   }
 
-  async create(dto: CreateUserDto): Promise<UserDto> {
+  async create(dto: CreateUserDto, actingUserId: number | null = null): Promise<UserDto> {
     const email = normalizeEmail(dto.email);
     const clash = await this.usersRepository.findOne({ where: { email } });
     if (clash) {
@@ -48,6 +50,13 @@ export class UsersService {
         isActive: true,
       }),
     );
+    await this.auditService.record({
+      userId: actingUserId,
+      action: 'user.create',
+      entityType: 'user',
+      entityId: user.id,
+      summary: `Added ${user.name || user.email} as ${user.role}`,
+    });
     return toDto(user);
   }
 
@@ -78,16 +87,39 @@ export class UsersService {
       }
     }
 
+    const changes: string[] = [];
+    if (dto.name !== undefined && dto.name.trim() !== user.name) changes.push(`name → ${dto.name.trim()}`);
+    if (dto.role !== undefined && dto.role !== user.role) changes.push(`role ${user.role} → ${dto.role}`);
+    if (dto.is_active !== undefined && dto.is_active !== user.isActive) {
+      changes.push(dto.is_active ? 'reactivated' : 'deactivated');
+    }
     if (dto.name !== undefined) user.name = dto.name.trim();
     if (dto.role !== undefined) user.role = dto.role;
     if (dto.is_active !== undefined) user.isActive = dto.is_active;
-    return toDto(await this.usersRepository.save(user));
+    const saved = await this.usersRepository.save(user);
+    if (changes.length > 0) {
+      await this.auditService.record({
+        userId: actingUserId,
+        action: 'user.update',
+        entityType: 'user',
+        entityId: id,
+        summary: `${saved.name || saved.email}: ${changes.join(', ')}`,
+      });
+    }
+    return toDto(saved);
   }
 
-  async resetPassword(id: number, dto: ResetPasswordDto): Promise<void> {
+  async resetPassword(id: number, dto: ResetPasswordDto, actingUserId: number | null = null): Promise<void> {
     const user = await this.findEntity(id);
     user.passwordHash = await bcrypt.hash(dto.password, BCRYPT_SALT_ROUNDS);
     await this.usersRepository.save(user);
+    await this.auditService.record({
+      userId: actingUserId,
+      action: 'user.password_reset',
+      entityType: 'user',
+      entityId: id,
+      summary: `Password reset for user #${id}`,
+    });
   }
 
   private async findEntity(id: number): Promise<User> {

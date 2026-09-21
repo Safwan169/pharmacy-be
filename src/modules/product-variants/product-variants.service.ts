@@ -12,7 +12,10 @@ import {
   SelectQueryBuilder,
 } from 'typeorm';
 import { PaginatedDto, paginate } from '../../common/dto/paginated.dto';
+import { fromMinorUnits, toMinorUnits } from '../../common/money';
 import { StockService } from '../stock/stock.service';
+import { AuditService } from '../audit/audit.service';
+import { BulkPriceDto, BulkPricePreviewDto } from './dto/bulk-price.dto';
 import {
   BaseUnit,
   UnitTemplateRow,
@@ -35,6 +38,7 @@ export class ProductVariantsService {
     @InjectRepository(ProductVariant)
     private readonly variantsRepository: Repository<ProductVariant>,
     private readonly stockService: StockService,
+    private readonly auditService: AuditService,
   ) {}
 
   /** Suggested unit ladder for a SKU that hasn't been set up yet. */
@@ -264,6 +268,12 @@ export class ProductVariantsService {
         throw new NotFoundException(`Product variant ${id} not found`);
       }
 
+      const before = await manager.find(VariantUnit, {
+        where: { variantId: id },
+        order: { sortOrder: 'ASC' },
+      });
+      const label = await this.labelFor(manager, variant);
+
       let priceTouched = false;
       if (dto.units !== undefined) {
         await this.replaceLadder(manager, variant, dto.units);
@@ -291,6 +301,41 @@ export class ProductVariantsService {
       if (Object.keys(patch).length > 0) {
         await manager.update(ProductVariant, { id }, patch);
       }
+      if (priceTouched) {
+        const after = await manager.find(VariantUnit, {
+          where: { variantId: id },
+          order: { sortOrder: 'ASC' },
+        });
+        const changes = describeLadderChange(before, after);
+        if (changes.length > 0) {
+          await this.auditService.record(
+            {
+              userId,
+              action: 'price.update',
+              entityType: 'variant',
+              entityId: id,
+              summary: `${label}: ${changes.join(', ')}`,
+              details: {
+                before: before.map(unitSnapshot),
+                after: after.map(unitSnapshot),
+              },
+            },
+            manager,
+          );
+        }
+      }
+      if (dto.reorder_level !== undefined && dto.reorder_level !== variant.reorderLevel) {
+        await this.auditService.record(
+          {
+            userId,
+            action: 'reorder.update',
+            entityType: 'variant',
+            entityId: id,
+            summary: `${label}: reorder level ${variant.reorderLevel ?? 'default'} → ${dto.reorder_level ?? 'default'}`,
+          },
+          manager,
+        );
+      }
       // "Set stock to N" is a count correction: the difference is booked as an
       // adjustment against batches so the ledger and batch totals stay honest.
       if (dto.stock_quantity !== undefined) {
@@ -301,10 +346,132 @@ export class ProductVariantsService {
           userId,
           dto.stock_note,
         );
+        if (dto.stock_quantity !== variant.stockQuantity) {
+          await this.auditService.record(
+            {
+              userId,
+              action: 'stock.adjust',
+              entityType: 'variant',
+              entityId: id,
+              summary: `${label}: stock ${variant.stockQuantity ?? 'uncounted'} → ${dto.stock_quantity} ${variant.baseUnit}${dto.stock_note ? ` (${dto.stock_note})` : ''}`,
+            },
+            manager,
+          );
+        }
       }
     });
 
     return this.findOne(id);
+  }
+
+  /** "Napa 500 mg" — for audit lines, so nobody has to look an id up. */
+  private async labelFor(manager: EntityManager, variant: ProductVariant): Promise<string> {
+    const product = await manager.findOne(Product, { where: { id: variant.productId } });
+    return `${product?.brandName ?? `#${variant.id}`}${variant.strength ? ` ${variant.strength}` : ''}`;
+  }
+
+  /**
+   * Changes every priced, sellable unit of the matching SKUs by a percentage
+   * or a fixed amount, rounded to `round_to`. `dry_run` only counts and shows
+   * a sample, so the owner sees what "+5% for Square" really does first.
+   */
+  async bulkPrice(dto: BulkPriceDto, userId: number): Promise<BulkPricePreviewDto> {
+    if ((dto.percent === undefined) === (dto.amount === undefined)) {
+      throw new BadRequestException('Send exactly one of percent or amount.');
+    }
+    const qb = this.variantsRepository
+      .createQueryBuilder('variant')
+      .innerJoinAndSelect('variant.product', 'product')
+      .innerJoinAndSelect('variant.units', 'unit', 'unit.price IS NOT NULL')
+      .leftJoin('variant.generic', 'generic')
+      .where('variant.isActive = true');
+    if (dto.manufacturer_id !== undefined) {
+      qb.andWhere('product.manufacturerId = :m', { m: dto.manufacturer_id });
+    }
+    if (dto.generic_id !== undefined) {
+      qb.andWhere('variant.genericId = :g', { g: dto.generic_id });
+    }
+    if (dto.search) {
+      qb.andWhere('(product.brandName ILIKE :s OR generic.name ILIKE :s)', { s: `%${dto.search.trim()}%` });
+    }
+    if (dto.manufacturer_id === undefined && dto.generic_id === undefined && !dto.search) {
+      throw new BadRequestException({
+        message: 'Narrow it down: pick a company, an ingredient or a search term.',
+        reason: 'filter_required',
+      });
+    }
+    const variants = await qb.orderBy('product.brandName', 'ASC').addOrderBy('unit.sortOrder', 'ASC').getMany();
+
+    const step = Math.round((dto.round_to ?? 0.5) * 100) || 1;
+    const rounded = (minor: number) => Math.round(minor / step) * step;
+    const next = (oldMinor: number) =>
+      Math.max(
+        0,
+        rounded(
+          dto.percent !== undefined
+            ? Math.round(oldMinor * (1 + dto.percent / 100))
+            : oldMinor + toMinorUnits(dto.amount as number),
+        ),
+      );
+
+    const rows: { variant_id: number; name: string; unit: string; old_price: number; new_price: number }[] = [];
+    for (const v of variants) {
+      const name = `${v.product.brandName}${v.strength ? ` ${v.strength}` : ''}`;
+      for (const u of v.units) {
+        const oldMinor = toMinorUnits(u.price as number);
+        const newMinor = next(oldMinor);
+        if (newMinor !== oldMinor) {
+          rows.push({ variant_id: v.id, name, unit: u.name, old_price: u.price as number, new_price: fromMinorUnits(newMinor) });
+        }
+      }
+    }
+    const variantIds = [...new Set(rows.map((r) => r.variant_id))];
+
+    if (!dto.dry_run && rows.length > 0) {
+      await this.dataSource.transaction(async (manager) => {
+        for (const v of variants) {
+          let touched = false;
+          for (const u of v.units) {
+            const row = rows.find((r) => r.variant_id === v.id && r.unit === u.name);
+            if (!row) continue;
+            await manager.update(VariantUnit, { id: u.id }, { price: row.new_price });
+            touched = true;
+          }
+          if (touched) {
+            const shown = v.units.find((u) => u.isDefault) ?? v.units[0];
+            const shownRow = shown && rows.find((r) => r.variant_id === v.id && r.unit === shown.name);
+            await manager.update(
+              ProductVariant,
+              { id: v.id },
+              { price: shownRow ? shownRow.new_price : (shown?.price ?? null), priceUpdatedAt: new Date() },
+            );
+          }
+        }
+        await this.auditService.record(
+          {
+            userId,
+            action: 'price.bulk',
+            entityType: 'catalogue',
+            summary: `Bulk price change ${dto.percent !== undefined ? `${dto.percent > 0 ? '+' : ''}${dto.percent}%` : `${(dto.amount as number) > 0 ? '+' : ''}${dto.amount}`} on ${variantIds.length} medicines (${rows.length} unit prices)`,
+            details: {
+              filter: { manufacturer_id: dto.manufacturer_id, generic_id: dto.generic_id, search: dto.search },
+              percent: dto.percent,
+              amount: dto.amount,
+              round_to: dto.round_to ?? 0.5,
+              variant_ids: variantIds,
+            },
+          },
+          manager,
+        );
+      });
+    }
+
+    return {
+      dry_run: dto.dry_run !== false,
+      variants: variantIds.length,
+      unit_prices: rows.length,
+      sample: rows.slice(0, 25),
+    };
   }
 
   private async replaceLadder(
@@ -374,18 +541,19 @@ export class ProductVariantsService {
    *
    * Idempotent — deactivating an already-inactive variant is a no-op, not an error.
    */
-  async deactivate(id: number): Promise<ProductVariant> {
-    return this.setActive(id, false);
+  async deactivate(id: number, userId: number | null = null): Promise<ProductVariant> {
+    return this.setActive(id, false, userId);
   }
 
   /** Puts a withdrawn SKU back in the catalogue. */
-  async restore(id: number): Promise<ProductVariant> {
-    return this.setActive(id, true);
+  async restore(id: number, userId: number | null = null): Promise<ProductVariant> {
+    return this.setActive(id, true, userId);
   }
 
   private async setActive(
     id: number,
     isActive: boolean,
+    userId: number | null,
   ): Promise<ProductVariant> {
     const variant = await this.variantsRepository.findOne({ where: { id } });
     if (!variant) {
@@ -393,6 +561,15 @@ export class ProductVariantsService {
     }
 
     await this.variantsRepository.update({ id }, { isActive });
+    if (variant.isActive !== isActive) {
+      await this.auditService.record({
+        userId,
+        action: isActive ? 'variant.restore' : 'variant.withdraw',
+        entityType: 'variant',
+        entityId: id,
+        summary: `${await this.labelFor(this.dataSource.manager, variant)}: ${isActive ? 'put back on sale' : 'withdrawn from sale'}`,
+      });
+    }
 
     return this.findOne(id);
   }
@@ -429,4 +606,24 @@ function validateLadder(units: UnitInputDto[]): void {
   if (new Set(qtys).size !== qtys.length) {
     throw new BadRequestException('Two units cannot have the same size.');
   }
+}
+
+function unitSnapshot(u: VariantUnit) {
+  return { name: u.name, qty_in_base: u.qtyInBase, price: u.price, is_sellable: u.isSellable, is_default: u.isDefault };
+}
+
+/** "strip 10.00 → 12.00, box added at 110.00" — the readable part of a price change. */
+function describeLadderChange(before: VariantUnit[], after: VariantUnit[]): string[] {
+  const fmt = (p: number | null) => (p === null ? '—' : p.toFixed(2));
+  const out: string[] = [];
+  for (const a of after) {
+    const b = before.find((x) => x.name === a.name);
+    if (!b) out.push(`${a.name} added at ${fmt(a.price)}`);
+    else if (b.price !== a.price) out.push(`${a.name} ${fmt(b.price)} → ${fmt(a.price)}`);
+    else if (b.qtyInBase !== a.qtyInBase) out.push(`${a.name} size ${b.qtyInBase} → ${a.qtyInBase}`);
+  }
+  for (const b of before) {
+    if (!after.some((a) => a.name === b.name)) out.push(`${b.name} removed`);
+  }
+  return out;
 }

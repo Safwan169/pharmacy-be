@@ -53,8 +53,8 @@ export class UsersController {
   @ApiOperation({ summary: 'Add a user (owner or cashier)' })
   @ApiCreatedResponse({ type: UserDto })
   @ApiConflictResponse({ description: 'Email already in use.' })
-  create(@Body() dto: CreateUserDto): Promise<UserDto> {
-    return this.usersService.create(dto);
+  create(@Body() dto: CreateUserDto, @CurrentUser() user: AuthenticatedUser): Promise<UserDto> {
+    return this.usersService.create(dto, user.id);
   }
 
   @Patch(':id')
@@ -82,7 +82,8 @@ export class UsersController {
   async resetPassword(
     @Param('id', ParseIntPipe) id: number,
     @Body() dto: ResetPasswordDto,
+    @CurrentUser() user: AuthenticatedUser,
   ): Promise<void> {
-    await this.usersService.resetPassword(id, dto);
+    await this.usersService.resetPassword(id, dto, user.id);
   }
 }

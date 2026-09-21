@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { AuditService } from '../audit/audit.service';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Setting } from './entities/setting.entity';
@@ -38,6 +39,7 @@ export class SettingsService {
     @InjectRepository(Setting)
     private readonly settingsRepository: Repository<Setting>,
     private readonly configService: ConfigService,
+    private readonly auditService: AuditService,
   ) {}
 
   async getAll(): Promise<ShopSettings> {
@@ -53,15 +55,27 @@ export class SettingsService {
     return merged;
   }
 
-  async update(patch: Partial<ShopSettings>): Promise<ShopSettings> {
+  async update(patch: Partial<ShopSettings>, actingUserId: number | null = null): Promise<ShopSettings> {
+    const before = await this.getAll();
+    const changed: string[] = [];
     for (const key of SETTING_KEYS) {
       const value = patch[key];
       if (value === undefined) continue;
+      if (value.trim() !== before[key]) changed.push(key);
       await this.settingsRepository.save(
         this.settingsRepository.create({ key, value: value.trim() }),
       );
     }
     this.cache = null;
+    if (changed.length > 0) {
+      await this.auditService.record({
+        userId: actingUserId,
+        action: 'settings.update',
+        entityType: 'settings',
+        summary: `Settings changed: ${changed.join(', ')}`,
+        details: Object.fromEntries(changed.map((k) => [k, { from: before[k], to: patch[k]?.trim() }])),
+      });
+    }
     return this.getAll();
   }
 

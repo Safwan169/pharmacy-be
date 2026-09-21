@@ -6,6 +6,8 @@ import {
   ApiOperation,
   ApiTags,
 } from '@nestjs/swagger';
+import { CurrentUser } from '../../common/decorators/current-user.decorator';
+import type { AuthenticatedUser } from '../../common/types/authenticated-user';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
@@ -31,7 +33,7 @@ export class SettingsController {
   @ApiOperation({ summary: 'Update any of the settings (owner)' })
   @ApiOkResponse({ type: SettingsDto })
   @ApiForbiddenResponse({ description: 'Owner only.' })
-  update(@Body() dto: UpdateSettingsDto): Promise<SettingsDto> {
-    return this.settingsService.update(dto);
+  update(@Body() dto: UpdateSettingsDto, @CurrentUser() user: AuthenticatedUser): Promise<SettingsDto> {
+    return this.settingsService.update(dto, user.id);
   }
 }
