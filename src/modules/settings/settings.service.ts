@@ -57,7 +57,7 @@ export class SettingsService {
 
   async update(patch: Partial<ShopSettings>, actingUserId: number | null = null): Promise<ShopSettings> {
     const before = await this.getAll();
-    const changed: string[] = [];
+    const changed: (keyof ShopSettings)[] = [];
     for (const key of SETTING_KEYS) {
       const value = patch[key];
       if (value === undefined) continue;
