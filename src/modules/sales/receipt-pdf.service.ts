@@ -36,20 +36,21 @@ export class ReceiptPdfService {
       }
       if (sale.status === 'voided') {
         doc.moveDown(0.3);
-        doc.fontSize(11).text('*** VOIDED ***', { align: 'center' });
+        doc.fontSize(11).text('*** VOIDED ***', this.left(doc), doc.y, { align: 'center', width: w });
       }
       this.line(doc, w);
 
       doc.fontSize(8);
       for (const item of sale.items ?? []) {
+        const { unit, marker } = splitUnitMarker(item.unitNameSnapshot);
         const name = [item.brandNameSnapshot, item.strengthSnapshot]
           .filter((p): p is string => !!p)
           .join(' ');
-        doc.text(name, { width: w });
-        const qty = `${item.quantity} ${item.unitNameSnapshot} x ${formatAmount(item.unitPrice)}`;
+        doc.text(marker ? `${name} (${marker})` : name, this.left(doc), doc.y, { width: w });
+        const qty = `${item.quantity} ${unit} x ${formatAmount(item.unitPrice)}`;
         const y = doc.y;
-        doc.text(qty, 0, y, { width: w * 0.65 });
-        doc.text(this.money(item.lineTotal), w * 0.6, y, { width: w * 0.4, align: 'right' });
+        doc.text(qty, this.left(doc), y, { width: w * 0.62 });
+        doc.text(this.money(item.lineTotal), this.left(doc) + w * 0.62, y, { width: w * 0.38, align: 'right' });
         doc.moveDown(0.2);
       }
       this.line(doc, w);
@@ -88,7 +89,7 @@ export class ReceiptPdfService {
     const width = await this.settingsService.receiptWidthMm();
     return this.render(width, (doc, w) => {
       this.header(doc, settings, w);
-      doc.fontSize(10).text('PAYMENT RECEIPT', { align: 'center' });
+      doc.fontSize(10).text('PAYMENT RECEIPT', this.left(doc), doc.y, { align: 'center', width: w });
       this.line(doc, w);
       this.kv(doc, 'Receipt', payment.receiptNumber, w);
       this.kv(doc, 'Date', formatDateTime(payment.createdAt), w);
@@ -101,7 +102,7 @@ export class ReceiptPdfService {
       this.kv(doc, 'By', paymentLabel(payment.method), w);
       if (payment.bkashTrxId) this.kv(doc, 'bKash TrxID', payment.bkashTrxId, w);
       this.kv(doc, 'Balance left', this.money(payment.balanceAfter), w);
-      if (payment.note) doc.text(payment.note, { width: w });
+      if (payment.note) doc.text(payment.note, this.left(doc), doc.y, { width: w });
       this.footer(doc, settings, w);
     });
   }
@@ -111,60 +112,76 @@ export class ReceiptPdfService {
     draw: (doc: PDFKit.PDFDocument, contentWidth: number) => void,
   ): Promise<Buffer> {
     const pageWidth = widthMm * MM;
-    const margin = 3 * MM;
+    const margin = 4 * MM;
     const contentWidth = pageWidth - margin * 2;
-    // Tall enough for any receipt; the reader/printer trims to content.
-    const doc = new PDFDocument({
-      size: [pageWidth, 2000],
-      margins: { top: margin, bottom: margin, left: margin, right: margin },
-    });
+    // A page's size is fixed when it is created, so draw twice: once on a
+    // very tall page just to measure, then for real on a page exactly as
+    // tall as the receipt, so the printer cuts right after the footer.
+    const build = (height: number) => {
+      const doc = new PDFDocument({
+        size: [pageWidth, height],
+        margins: { top: margin, bottom: margin, left: margin, right: margin },
+      });
+      if (this.customFont !== null) {
+        doc.registerFont('receipt', this.customFont);
+        doc.font('receipt');
+      }
+      return doc;
+    };
+    const probe = build(4000);
+    probe.on('data', () => undefined);
+    draw(probe, contentWidth);
+    const usedHeight = Math.max(probe.y + margin, 40 * MM);
+    probe.end();
+
+    const doc = build(usedHeight);
     const chunks: Buffer[] = [];
     doc.on('data', (chunk: Buffer) => chunks.push(chunk));
     const finished = new Promise<Buffer>((resolve, reject) => {
       doc.on('end', () => resolve(Buffer.concat(chunks)));
       doc.on('error', reject);
     });
-    if (this.customFont !== null) {
-      doc.registerFont('receipt', this.customFont);
-      doc.font('receipt');
-    }
     draw(doc, contentWidth);
-    // Shrink the page to what was drawn so the printer cuts at the footer.
-    const usedHeight = doc.y + margin * 2;
-    doc.page.height = Math.max(usedHeight, 40 * MM);
     doc.end();
     return finished;
   }
 
   private header(doc: PDFKit.PDFDocument, s: ShopSettings, w: number): void {
-    doc.fontSize(12).text(s.shop_name || 'Pharmacy', { align: 'center', width: w });
+    const x = this.left(doc);
+    doc.fontSize(12).text(s.shop_name || 'Pharmacy', x, doc.y, { align: 'center', width: w });
     doc.fontSize(7);
-    if (s.shop_address) doc.text(s.shop_address, { align: 'center', width: w });
-    if (s.shop_phone) doc.text(`Phone: ${s.shop_phone}`, { align: 'center', width: w });
-    if (s.drug_license_no) doc.text(`Drug Licence: ${s.drug_license_no}`, { align: 'center', width: w });
+    if (s.shop_address) doc.text(s.shop_address, x, doc.y, { align: 'center', width: w });
+    if (s.shop_phone) doc.text(`Phone: ${s.shop_phone}`, x, doc.y, { align: 'center', width: w });
+    if (s.drug_license_no) doc.text(`Drug Licence: ${s.drug_license_no}`, x, doc.y, { align: 'center', width: w });
     doc.moveDown(0.3);
   }
 
   private footer(doc: PDFKit.PDFDocument, s: ShopSettings, w: number): void {
     this.line(doc, w);
     doc.fontSize(7);
-    if (s.receipt_footer) doc.text(s.receipt_footer, { align: 'center', width: w });
+    if (s.receipt_footer) doc.text(s.receipt_footer, this.left(doc), doc.y, { align: 'center', width: w });
     doc.moveDown(0.5);
+  }
+
+  private left(doc: PDFKit.PDFDocument): number {
+    return doc.page.margins.left;
   }
 
   private kv(doc: PDFKit.PDFDocument, key: string, value: string, w: number, bold = false): void {
     const y = doc.y;
-    doc.text(key, 0, y, { width: w * 0.5 });
-    doc.text(value, w * 0.5, y, { width: w * 0.5, align: 'right' });
+    const x = this.left(doc);
+    doc.text(key, x, y, { width: w * 0.5 });
+    doc.text(value, x + w * 0.5, y, { width: w * 0.5, align: 'right' });
     if (bold) doc.moveDown(0.2);
   }
 
   private line(doc: PDFKit.PDFDocument, w: number): void {
     doc.moveDown(0.2);
     const y = doc.y;
-    doc.moveTo(0, y).lineTo(w, y).dash(1, { space: 1 }).stroke().undash();
+    const x = this.left(doc);
+    doc.moveTo(x, y).lineTo(x + w, y).dash(1, { space: 1 }).stroke().undash();
     doc.y = y + 4;
-    doc.x = 0;
+    doc.x = x;
   }
 
   private money(amount: number): string {
@@ -182,6 +199,12 @@ export class ReceiptPdfService {
       return null;
     }
   }
+}
+
+/** "tablet (old price)" -> unit "tablet", marker "old price". */
+export function splitUnitMarker(unitName: string): { unit: string; marker: string | null } {
+  const m = /^(.*?)\s*\(([^)]+)\)\s*$/.exec(unitName);
+  return m ? { unit: m[1], marker: m[2] } : { unit: unitName, marker: null };
 }
 
 function paymentLabel(method: string): string {

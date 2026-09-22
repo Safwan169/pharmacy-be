@@ -3,6 +3,7 @@ import * as fs from 'fs';
 import PDFDocument from 'pdfkit';
 import { formatAmount } from '../../common/money';
 import { SettingsService, ShopSettings } from '../settings/settings.service';
+import { splitUnitMarker } from './receipt-pdf.service';
 import { Sale } from './entities/sale.entity';
 
 /**
@@ -150,18 +151,22 @@ export class InvoicePdfService {
     for (const item of sale.items) {
       // Rendered from the snapshots, never a live catalogue join, so the
       // invoice keeps showing what was actually sold.
-      const description = [
-        item.brandNameSnapshot,
-        item.dosageFormSnapshot,
-        item.strengthSnapshot,
-      ]
-        .filter((part): part is string => part !== null && part !== '')
-        .join(' — ');
+      const { unit, marker } = splitUnitMarker(item.unitNameSnapshot);
+      const description =
+        [item.brandNameSnapshot, item.dosageFormSnapshot, item.strengthSnapshot]
+          .filter((part): part is string => part !== null && part !== '')
+          .join(' — ') + (marker ? ` (${marker})` : '');
+      const qty = `${item.quantity} ${unit}`;
 
-      const height = doc.heightOfString(description, { width: 250 });
-      doc.text(description, COLUMNS.item, y, { width: 250 });
-      doc.text(`${item.quantity} ${item.unitNameSnapshot}`, COLUMNS.qty, y, {
-        width: 55,
+      // Row height follows the tallest cell, so a wrapped name or unit never
+      // runs into the next row.
+      const height = Math.max(
+        doc.heightOfString(description, { width: 240 }),
+        doc.heightOfString(qty, { width: 70 }),
+      );
+      doc.text(description, COLUMNS.item, y, { width: 240 });
+      doc.text(qty, COLUMNS.qty - 15, y, {
+        width: 70,
         align: 'right',
       });
       doc.text(this.money(item.unitPrice), COLUMNS.unitPrice, y, {
