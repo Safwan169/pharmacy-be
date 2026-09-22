@@ -1,6 +1,6 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
-import { DataSource, EntityManager } from 'typeorm';
+import { DataSource, EntityManager, In } from 'typeorm';
 import { AuditService } from '../audit/audit.service';
 import { ProductVariant } from '../product-variants/entities/product-variant.entity';
 import { VariantUnit } from '../product-variants/entities/variant-unit.entity';
@@ -120,6 +120,18 @@ export class PendingPriceService {
     await this.applyNow(manager, variantId, pending.unitPrices, userId, 'old stock sold out');
     await manager.delete(VariantPendingPrice, { id: pending.id });
     return true;
+  }
+
+  /** Pending rows for many variants at once, each with its old-stock count. */
+  async forVariants(manager: EntityManager, variantIds: number[]): Promise<Map<number, VariantPendingPrice>> {
+    const out = new Map<number, VariantPendingPrice>();
+    if (variantIds.length === 0) return out;
+    const rows = await manager.find(VariantPendingPrice, { where: { variantId: In(variantIds) } });
+    for (const row of rows) {
+      row.oldStockLeft = await this.oldStockLeft(manager, row.variantId, row.afterBatchId);
+      out.set(row.variantId, row);
+    }
+    return out;
   }
 
   async forVariant(variantId: number): Promise<VariantPendingPrice | null> {

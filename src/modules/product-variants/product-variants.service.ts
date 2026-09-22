@@ -124,6 +124,10 @@ export class ProductVariantsService {
       .take(query.limit);
 
     const [data, total] = await qb.getManyAndCount();
+    // The counter needs to know about a price waiting on old stock so it can
+    // show the split before the customer pays.
+    const pending = await this.pendingPrices.forVariants(this.dataSource.manager, data.map((v) => v.id));
+    for (const v of data) v.pendingPrice = pending.get(v.id) ?? null;
     return paginate(data, total, query.page, query.limit);
   }
 

@@ -22,6 +22,17 @@ import { Sale } from './entities/sale.entity';
 
 import { fromMinorUnits, toMinorUnits } from '../../common/money';
 
+/** A basket item after pricing — possibly one of two halves of a split line. */
+interface PricedSaleLine {
+  item: CheckoutDto['items'][number];
+  unit: VariantUnit;
+  unitPrice: number;
+  quantity: number;
+  allocations: BatchAllocation[];
+  /** True for the half sold from older batches at the price they carried. */
+  oldPrice: boolean;
+}
+
 function normalisePhone(phone: string | undefined | null): string | null {
   const digits = (phone ?? '').replace(/[^\d+]/g, '');
   return digits === '' ? null : digits;
@@ -156,12 +167,49 @@ export class SalesService {
         throw rejectCheckout(failures);
       }
 
+      // A price waiting on old stock splits a line in two: what comes out of
+      // the older batches at today's price, the rest at the new one. So the
+      // packs with the old MRP printed on them go at the old price, exactly.
+      const pending = await this.pendingPrices.forVariants(
+        manager,
+        dto.items.map((i) => i.variant_id),
+      );
+      const priced: PricedSaleLine[] = [];
+      for (const item of dto.items) {
+        const unit = lineUnits.get(item.variant_id)!;
+        const allocations = lineBatches.get(item.variant_id)!;
+        const waiting = pending.get(item.variant_id);
+        const newPrice = waiting?.unitPrices.find((p) => p.unit_id === unit.id)?.price;
+        const oldBase = waiting
+          ? allocations.filter((a) => a.batch.id < waiting.afterBatchId).reduce((s, a) => s + a.quantity, 0)
+          : 0;
+        const oldUnits = waiting ? Math.min(item.quantity, Math.floor(oldBase / unit.qtyInBase)) : item.quantity;
+        if (waiting === undefined || newPrice === undefined || newPrice === unit.price! || oldUnits === item.quantity) {
+          priced.push({ item, unit, unitPrice: unit.price!, quantity: item.quantity, allocations, oldPrice: false });
+          continue;
+        }
+        if (oldUnits > 0) {
+          priced.push({
+            item,
+            unit,
+            unitPrice: unit.price!,
+            quantity: oldUnits,
+            allocations: allocations.filter((a) => a.batch.id < waiting.afterBatchId),
+            oldPrice: true,
+          });
+        }
+        priced.push({
+          item,
+          unit,
+          unitPrice: newPrice,
+          quantity: item.quantity - oldUnits,
+          allocations: allocations.filter((a) => a.batch.id >= waiting.afterBatchId),
+          oldPrice: false,
+        });
+      }
+
       const totals = computeCheckoutTotals(
-        dto.items.map((item) => ({
-          // Non-null: the price check above already rejected unpriced units.
-          unitPrice: lineUnits.get(item.variant_id)!.price!,
-          quantity: item.quantity,
-        })),
+        priced.map((line) => ({ unitPrice: line.unitPrice, quantity: line.quantity })),
         dto.discount,
       );
 
@@ -217,13 +265,10 @@ export class SalesService {
 
       // Deduct in a stable id order so two concurrent checkouts touching the
       // same variants take row locks in the same sequence and can't deadlock.
-      const ordered = [...dto.items]
-        .map((item, index) => ({ item, index }))
-        .sort((a, b) => a.item.variant_id - b.item.variant_id);
+      const ordered = [...dto.items].sort((a, b) => a.variant_id - b.variant_id);
       const items: SaleItem[] = [];
-      for (const { item, index } of ordered) {
+      for (const item of ordered) {
         const variant = variantsById.get(item.variant_id)!;
-        const unit = lineUnits.get(item.variant_id)!;
         const allocations = lineBatches.get(item.variant_id)!;
 
         for (const allocation of allocations) {
@@ -250,33 +295,35 @@ export class SalesService {
           }
         }
 
-        // One line per basket item. When a line straddles batches, batch_id
-        // is the one it mostly came from; the per-batch split is in
-        // stock_movements under this sale's id.
-        const primary = [...allocations].sort(
-          (a, b) => b.quantity - a.quantity,
-        )[0];
-        items.push(
-          manager.create(SaleItem, {
-            saleId: sale.id,
-            productVariantId: variant.id,
-            batchId: primary.batch.id,
-            // Snapshots: a later catalogue edit must not rewrite this invoice.
-            brandNameSnapshot: variant.product.brandName,
-            dosageFormSnapshot: variant.dosageForm,
-            strengthSnapshot: variant.strength,
-            unitNameSnapshot: unit.name,
-            qtyInBase: unit.qtyInBase,
-            baseQtyDeducted: item.quantity * unit.qtyInBase,
-            unitPrice: unit.price!,
-            quantity: item.quantity,
-            lineTotal: totals.lineTotals[index],
-          }),
-        );
+        // One row per priced line (two when a waiting price split it). When
+        // a line straddles batches, batch_id is the one it mostly came from;
+        // the per-batch split is in stock_movements under this sale's id.
+        for (const line of priced) {
+          if (line.item.variant_id !== item.variant_id) continue;
+          const source = line.allocations.length > 0 ? line.allocations : allocations;
+          const primary = [...source].sort((a, b) => b.quantity - a.quantity)[0];
+          items.push(
+            manager.create(SaleItem, {
+              saleId: sale.id,
+              productVariantId: variant.id,
+              batchId: primary.batch.id,
+              // Snapshots: a later catalogue edit must not rewrite this invoice.
+              brandNameSnapshot: variant.product.brandName,
+              dosageFormSnapshot: variant.dosageForm,
+              strengthSnapshot: variant.strength,
+              unitNameSnapshot: line.oldPrice ? `${line.unit.name} (old price)` : line.unit.name,
+              qtyInBase: line.unit.qtyInBase,
+              baseQtyDeducted: line.quantity * line.unit.qtyInBase,
+              unitPrice: line.unitPrice,
+              quantity: line.quantity,
+              lineTotal: totals.lineTotals[priced.indexOf(line)],
+            }),
+          );
+        }
       }
       await manager.save(items);
       // A parked price change goes live the moment the old batches are gone.
-      for (const { item } of ordered) {
+      for (const item of ordered) {
         await this.pendingPrices.activateIfDue(manager, item.variant_id, userId);
       }
       return sale.id;
