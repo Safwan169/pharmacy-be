@@ -404,13 +404,14 @@ export class ProductVariantsService {
 
     const step = Math.round((dto.round_to ?? 0.5) * 100) || 1;
     const rounded = (minor: number) => Math.round(minor / step) * step;
-    const next = (oldMinor: number) =>
+    // A fixed amount is per base unit (tablet, capsule…): a strip of 10 moves 10x.
+    const next = (oldMinor: number, qtyInBase: number) =>
       Math.max(
         0,
         rounded(
           dto.percent !== undefined
             ? Math.round(oldMinor * (1 + dto.percent / 100))
-            : oldMinor + toMinorUnits(dto.amount as number),
+            : oldMinor + toMinorUnits(dto.amount as number) * qtyInBase,
         ),
       );
 
@@ -419,7 +420,7 @@ export class ProductVariantsService {
       const name = `${v.product.brandName}${v.strength ? ` ${v.strength}` : ''}`;
       for (const u of v.units) {
         const oldMinor = toMinorUnits(u.price as number);
-        const newMinor = next(oldMinor);
+        const newMinor = next(oldMinor, u.qtyInBase);
         if (newMinor !== oldMinor) {
           rows.push({ variant_id: v.id, name, unit: u.name, old_price: u.price as number, new_price: fromMinorUnits(newMinor) });
         }

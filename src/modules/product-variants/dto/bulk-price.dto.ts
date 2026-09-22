@@ -19,7 +19,7 @@ export class BulkPriceDto {
   @Type(() => Number) @IsNumber({ maxDecimalPlaces: 2 }) @Min(-90) @Max(500) @IsOptional()
   percent?: number;
 
-  @ApiPropertyOptional({ example: 2, description: 'Fixed change per unit price; negative lowers.' })
+  @ApiPropertyOptional({ example: 2, description: 'Fixed change per base unit (tablet/capsule); packs scale by their size. Negative lowers.' })
   @Type(() => Number) @IsNumber({ maxDecimalPlaces: 2 }) @Min(-100000) @Max(100000) @IsOptional()
   amount?: number;
 
