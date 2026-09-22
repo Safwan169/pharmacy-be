@@ -4,6 +4,8 @@ import { IsInt, IsOptional, Max, Min } from 'class-validator';
 
 export const DEFAULT_PAGE_SIZE = 20;
 export const MAX_PAGE_SIZE = 100;
+/** For pickers that must list every company / ingredient in one go. */
+export const LOOKUP_MAX_PAGE_SIZE = 5000;
 
 export class PaginationQueryDto {
   @ApiPropertyOptional({
