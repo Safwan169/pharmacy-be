@@ -145,6 +145,22 @@ export class ProductVariant {
   priceUpdatedAt!: Date | null;
 
   @ApiPropertyOptional({
+    example: 8.06,
+    nullable: true,
+    description: 'MRP printed on the pack, per base unit. From the catalogue file.',
+  })
+  @Column({ type: 'numeric', precision: 10, scale: 2, nullable: true, transformer: numericTransformer })
+  mrp!: number | null;
+
+  @ApiPropertyOptional({
+    example: 241.8,
+    nullable: true,
+    description: 'MRP of a full pack (pack_size units), when the catalogue file gives one.',
+  })
+  @Column({ name: 'pack_mrp', type: 'numeric', precision: 10, scale: 2, nullable: true, transformer: numericTransformer })
+  packMrp!: number | null;
+
+  @ApiPropertyOptional({
     example: 50,
     nullable: true,
     description:

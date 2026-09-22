@@ -9,7 +9,8 @@ import { PendingUnitPrice, VariantPendingPrice } from './entities/variant-pendin
 import { describeLadderChange, unitSnapshot } from './ladder-diff';
 
 export interface UnitPriceInput {
-  unit_id: number;
+  unit_name: string;
+  qty_in_base: number;
   price: number;
 }
 
@@ -35,11 +36,9 @@ export class PendingPriceService {
     reason: string,
   ): Promise<string[]> {
     const before = await manager.find(VariantUnit, { where: { variantId }, order: { sortOrder: 'ASC' } });
+    const units = await this.ensureUnits(manager, variantId, prices);
     for (const p of prices) {
-      const unit = before.find((u) => u.id === p.unit_id);
-      if (!unit) {
-        throw new BadRequestException(`Unit ${p.unit_id} does not belong to medicine ${variantId}.`);
-      }
+      const unit = units.get(p.unit_name.trim().toLowerCase())!;
       await manager.update(VariantUnit, { id: unit.id }, { price: p.price });
     }
     const after = await manager.find(VariantUnit, { where: { variantId }, order: { sortOrder: 'ASC' } });
@@ -82,11 +81,11 @@ export class PendingPriceService {
       await this.applyNow(manager, variantId, prices, userId, 'no old stock left');
       return 'applied';
     }
-    const units = await manager.find(VariantUnit, { where: { variantId } });
+    // The units themselves are created straight away — only the price waits.
+    const units = await this.ensureUnits(manager, variantId, prices);
     const unitPrices: PendingUnitPrice[] = prices.map((p) => {
-      const unit = units.find((u) => u.id === p.unit_id);
-      if (!unit) throw new BadRequestException(`Unit ${p.unit_id} does not belong to medicine ${variantId}.`);
-      return { unit_id: unit.id, unit_name: unit.name, price: p.price };
+      const unit = units.get(p.unit_name.trim().toLowerCase())!;
+      return { unit_id: unit.id, unit_name: unit.name, qty_in_base: unit.qtyInBase, price: p.price };
     });
     await manager.delete(VariantPendingPrice, { variantId });
     await manager.save(
@@ -170,6 +169,58 @@ export class PendingPriceService {
         manager,
       );
     });
+  }
+
+  /**
+   * Finds each named unit on the medicine, creating it when it isn't there —
+   * most of the catalogue arrives with no sellable units at all, and a
+   * delivery is exactly the moment the shop decides how it will be sold.
+   */
+  private async ensureUnits(
+    manager: EntityManager,
+    variantId: number,
+    prices: UnitPriceInput[],
+  ): Promise<Map<string, VariantUnit>> {
+    const variant = await manager.findOne(ProductVariant, { where: { id: variantId } });
+    if (!variant) throw new NotFoundException(`Product variant ${variantId} not found`);
+    const existing = await manager.find(VariantUnit, { where: { variantId }, order: { sortOrder: 'ASC' } });
+    const byName = new Map(existing.map((u) => [u.name.toLowerCase(), u]));
+
+    for (const p of prices) {
+      const name = p.unit_name.trim().toLowerCase();
+      if (name === '') throw new BadRequestException('A unit needs a name.');
+      const found = byName.get(name);
+      if (found) {
+        // Sizes come from the shop: honour a correction like "a strip is 12".
+        if (found.qtyInBase !== p.qty_in_base) {
+          await manager.update(VariantUnit, { id: found.id }, { qtyInBase: p.qty_in_base });
+          found.qtyInBase = p.qty_in_base;
+        }
+        continue;
+      }
+      if (existing.some((u) => u.qtyInBase === p.qty_in_base)) {
+        throw new BadRequestException(`This medicine already has a unit of ${p.qty_in_base}.`);
+      }
+      const created = await manager.save(
+        manager.create(VariantUnit, {
+          variantId,
+          name,
+          qtyInBase: p.qty_in_base,
+          isSellable: true,
+          // The smallest unit sells by default, which is how a counter is used.
+          isDefault: existing.length === 0 && p.qty_in_base === Math.min(...prices.map((x) => x.qty_in_base)),
+          sortOrder: p.qty_in_base,
+        }),
+      );
+      existing.push(created);
+      byName.set(name, created);
+    }
+    // A medicine must have exactly one default unit for the counter to work.
+    const all = await manager.find(VariantUnit, { where: { variantId }, order: { sortOrder: 'ASC' } });
+    if (all.length > 0 && !all.some((u) => u.isDefault)) {
+      await manager.update(VariantUnit, { id: all[0].id }, { isDefault: true });
+    }
+    return new Map(all.map((u) => [u.name.toLowerCase(), u]));
   }
 
   /** Sellable base units in batches received before the given one. */

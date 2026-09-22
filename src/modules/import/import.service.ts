@@ -83,6 +83,8 @@ export class ImportService {
           slug: variant.slug,
           legacyBrandId: variant.legacyBrandId,
           packSize: variant.packSize,
+          mrp: variant.unitMrp,
+          packMrp: variant.packMrp,
           // Only used on insert: base_unit is left out of the update list so a
           // re-import never overrides what the admin chose.
           baseUnit: baseUnitForDosageForm(variant.dosageForm),
@@ -105,6 +107,8 @@ export class ImportService {
               'strength',
               'slug',
               'pack_size',
+              'mrp',
+              'pack_mrp',
             ],
             ['legacy_brand_id'],
           )

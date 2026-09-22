@@ -22,11 +22,17 @@ import { MOVEMENT_TYPES } from '../entities/stock-movement.entity';
 const DATE_ONLY = /^\d{4}-\d{2}-\d{2}$/;
 
 export class ReceiptSellPriceDto {
-  @ApiProperty({ example: 12, description: 'variant_units.id' })
+  @ApiProperty({ example: 'strip', description: 'Unit name; created for this medicine if new.' })
+  @IsString()
+  @MaxLength(30)
+  unit_name!: string;
+
+  @ApiProperty({ example: 10, description: 'Base units in one of these.' })
   @Type(() => Number)
   @IsInt()
   @Min(1)
-  unit_id!: number;
+  @Max(100_000)
+  qty_in_base!: number;
 
   @ApiProperty({ example: 2.5, description: 'New selling price for that unit.' })
   @Type(() => Number)

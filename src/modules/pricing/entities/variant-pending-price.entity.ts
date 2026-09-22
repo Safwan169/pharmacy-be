@@ -12,6 +12,7 @@ import { ProductVariant } from '../../product-variants/entities/product-variant.
 export interface PendingUnitPrice {
   unit_id: number;
   unit_name: string;
+  qty_in_base: number;
   price: number;
 }
 
