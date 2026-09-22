@@ -107,6 +107,22 @@ export class UpdatePricingDto {
   stock_note?: string;
 
   @ApiPropertyOptional({
+    example: 1.2,
+    nullable: true,
+    minimum: 0,
+    description:
+      'MRP printed on the pack, per base unit. Send null when the pack has ' +
+      'no printed price.',
+  })
+  @ValidateIf((_, value) => value !== null)
+  @Type(() => Number)
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0)
+  @Max(MAX_PRICE)
+  @IsOptional()
+  mrp?: number | null;
+
+  @ApiPropertyOptional({
     example: 50,
     nullable: true,
     minimum: 0,

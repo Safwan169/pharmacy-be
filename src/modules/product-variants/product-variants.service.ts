@@ -270,10 +270,11 @@ export class ProductVariantsService {
       dto.price === undefined &&
       dto.stock_quantity === undefined &&
       dto.units === undefined &&
-      dto.reorder_level === undefined
+      dto.reorder_level === undefined &&
+      dto.mrp === undefined
     ) {
       throw new BadRequestException(
-        'Send at least one of price, stock_quantity, units or reorder_level.',
+        'Send at least one of price, stock_quantity, units, reorder_level or mrp.',
       );
     }
     if (dto.units !== undefined) {
@@ -306,6 +307,9 @@ export class ProductVariantsService {
       const patch: Partial<ProductVariant> = {};
       if (dto.reorder_level !== undefined) {
         patch.reorderLevel = dto.reorder_level;
+      }
+      if (dto.mrp !== undefined) {
+        patch.mrp = dto.mrp;
       }
       if (priceTouched) {
         const units = await manager.find(VariantUnit, {
@@ -343,6 +347,18 @@ export class ProductVariantsService {
             manager,
           );
         }
+      }
+      if (dto.mrp !== undefined && dto.mrp !== variant.mrp) {
+        await this.auditService.record(
+          {
+            userId,
+            action: 'mrp.update',
+            entityType: 'variant',
+            entityId: id,
+            summary: `${label}: printed MRP ${variant.mrp?.toFixed(2) ?? '—'} → ${dto.mrp?.toFixed(2) ?? '—'}`,
+          },
+          manager,
+        );
       }
       if (dto.reorder_level !== undefined && dto.reorder_level !== variant.reorderLevel) {
         await this.auditService.record(

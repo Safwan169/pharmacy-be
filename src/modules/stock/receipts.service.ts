@@ -9,6 +9,7 @@ import { DataSource, In, Repository } from 'typeorm';
 import { nextDocumentNumber } from '../../common/document-number';
 import { PaginatedDto, paginate } from '../../common/dto/paginated.dto';
 import { fromMinorUnits, toMinorUnits } from '../../common/money';
+import { AuditService } from '../audit/audit.service';
 import { PendingPriceService } from '../pricing/pending-price.service';
 import { ProductVariant } from '../product-variants/entities/product-variant.entity';
 import {
@@ -51,6 +52,7 @@ export class ReceiptsService {
     private readonly movementsRepository: Repository<StockMovement>,
     private readonly stockService: StockService,
     private readonly pendingPrices: PendingPriceService,
+    private readonly auditService: AuditService,
   ) {}
 
   async create(dto: CreateReceiptDto, userId: number): Promise<StockReceipt> {
@@ -59,7 +61,7 @@ export class ReceiptsService {
     const id = await this.dataSource.transaction(async (manager) => {
       const variants = await manager.find(ProductVariant, {
         where: { id: In([...new Set(dto.items.map((i) => i.variant_id))]) },
-        relations: { units: true },
+        relations: { units: true, product: true },
       });
       const byId = new Map(variants.map((v) => [v.id, v]));
 
@@ -170,6 +172,22 @@ export class ReceiptsService {
             lineCost: fromMinorUnits(lineCostMinor),
           }),
         );
+
+        // The company revised the printed price: record it on the medicine so
+        // later deliveries are measured against the new MRP.
+        if (line.new_mrp !== undefined && line.new_mrp !== variant.mrp) {
+          await manager.update(ProductVariant, { id: variant.id }, { mrp: line.new_mrp });
+          await this.auditService.record(
+            {
+              userId,
+              action: 'mrp.update',
+              entityType: 'variant',
+              entityId: variant.id,
+              summary: `${variant.product?.brandName ?? `#${variant.id}`}${variant.strength ? ` ${variant.strength}` : ''}: printed MRP ${variant.mrp?.toFixed(2) ?? '—'} → ${line.new_mrp.toFixed(2)} (delivery ${receipt.receiptNumber})`,
+            },
+            manager,
+          );
+        }
 
         // Selling price set at the door: now, or once the older packs are gone.
         if (line.sell_prices && line.sell_prices.length > 0) {

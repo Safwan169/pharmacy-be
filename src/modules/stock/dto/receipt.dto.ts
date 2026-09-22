@@ -99,6 +99,19 @@ export class ReceiptLineDto {
   sell_prices?: ReceiptSellPriceDto[];
 
   @ApiPropertyOptional({
+    example: 1.5,
+    description:
+      'MRP printed on the packs in this delivery, per base unit. Sent when the ' +
+      'company has revised it, so later deliveries are checked against the new one.',
+  })
+  @Type(() => Number)
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0)
+  @Max(99_999_999.99)
+  @IsOptional()
+  new_mrp?: number;
+
+  @ApiPropertyOptional({
     enum: ['now', 'after_old_stock'],
     default: 'now',
     description:
