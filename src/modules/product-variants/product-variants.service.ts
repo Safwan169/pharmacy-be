@@ -63,23 +63,35 @@ export class ProductVariantsService {
 
     const term = query.search?.trim();
     if (term) {
+      // Every word has to match something, so "ace 500" finds Ace 500 mg even
+      // though the brand and the strength live in different columns, and
+      // "napa syrup" narrows to the syrup.
+      const words = term.split(/\s+/).filter(Boolean).slice(0, 6);
+      words.forEach((word, i) => {
+        qb.andWhere(
+          `(product.brandName ILIKE :w${i} OR generic.name ILIKE :w${i}
+            OR variant.strength ILIKE :w${i} OR variant.dosageForm ILIKE :w${i})`,
+          { [`w${i}`]: `%${word}%` },
+        );
+      });
       // Brand matches come before ingredient matches, and "Napa" itself before
       // "Lonapam" or anything containing "Napadisylate" — otherwise the
-      // medicine typed at the counter can fall off the first page.
-      qb.andWhere(
-        '(product.brandName ILIKE :search OR generic.name ILIKE :search)',
-        { search: `%${term}%` },
-      )
-        .addSelect(
-          `CASE
+      // medicine typed at the counter can fall off the first page. Ranking uses
+      // the first word, which is the brand in "ace 500".
+      qb.addSelect(
+        `CASE
             WHEN product.brandName ILIKE :exact THEN 0
             WHEN product.brandName ILIKE :prefix THEN 1
             WHEN product.brandName ILIKE :search THEN 2
             ELSE 3
           END`,
-          'search_rank',
-        )
-        .setParameters({ exact: term, prefix: `${term}%` })
+        'search_rank',
+      )
+        .setParameters({
+          exact: words[0] ?? term,
+          prefix: `${words[0] ?? term}%`,
+          search: `%${words[0] ?? term}%`,
+        })
         .orderBy('search_rank', 'ASC')
         .addOrderBy('product.brandName', 'ASC');
     } else {
