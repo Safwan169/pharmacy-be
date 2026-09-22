@@ -15,6 +15,8 @@ import { PaginatedDto, paginate } from '../../common/dto/paginated.dto';
 import { fromMinorUnits, toMinorUnits } from '../../common/money';
 import { StockService } from '../stock/stock.service';
 import { AuditService } from '../audit/audit.service';
+import { PendingPriceService } from '../pricing/pending-price.service';
+import { describeLadderChange, unitSnapshot } from '../pricing/ladder-diff';
 import { BulkPriceDto, BulkPricePreviewDto } from './dto/bulk-price.dto';
 import {
   BaseUnit,
@@ -39,6 +41,7 @@ export class ProductVariantsService {
     private readonly variantsRepository: Repository<ProductVariant>,
     private readonly stockService: StockService,
     private readonly auditService: AuditService,
+    private readonly pendingPrices: PendingPriceService,
   ) {}
 
   /** Suggested unit ladder for a SKU that hasn't been set up yet. */
@@ -227,6 +230,7 @@ export class ProductVariantsService {
       throw new NotFoundException(`Product variant ${id} not found`);
     }
     variant.batches = await this.stockService.batchesForVariant(id);
+    variant.pendingPrice = await this.pendingPrices.forVariant(id);
     return variant;
   }
 
@@ -609,22 +613,3 @@ function validateLadder(units: UnitInputDto[]): void {
   }
 }
 
-function unitSnapshot(u: VariantUnit) {
-  return { name: u.name, qty_in_base: u.qtyInBase, price: u.price, is_sellable: u.isSellable, is_default: u.isDefault };
-}
-
-/** "strip 10.00 → 12.00, box added at 110.00" — the readable part of a price change. */
-function describeLadderChange(before: VariantUnit[], after: VariantUnit[]): string[] {
-  const fmt = (p: number | null) => (p === null ? '—' : p.toFixed(2));
-  const out: string[] = [];
-  for (const a of after) {
-    const b = before.find((x) => x.name === a.name);
-    if (!b) out.push(`${a.name} added at ${fmt(a.price)}`);
-    else if (b.price !== a.price) out.push(`${a.name} ${fmt(b.price)} → ${fmt(a.price)}`);
-    else if (b.qtyInBase !== a.qtyInBase) out.push(`${a.name} size ${b.qtyInBase} → ${a.qtyInBase}`);
-  }
-  for (const b of before) {
-    if (!after.some((a) => a.name === b.name)) out.push(`${b.name} removed`);
-  }
-  return out;
-}

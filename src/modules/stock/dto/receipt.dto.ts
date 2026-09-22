@@ -21,6 +21,21 @@ import { MOVEMENT_TYPES } from '../entities/stock-movement.entity';
 
 const DATE_ONLY = /^\d{4}-\d{2}-\d{2}$/;
 
+export class ReceiptSellPriceDto {
+  @ApiProperty({ example: 12, description: 'variant_units.id' })
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  unit_id!: number;
+
+  @ApiProperty({ example: 2.5, description: 'New selling price for that unit.' })
+  @Type(() => Number)
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0)
+  @Max(99_999_999.99)
+  price!: number;
+}
+
 export class ReceiptLineDto {
   @ApiProperty({ example: 123 })
   @Type(() => Number)
@@ -64,6 +79,29 @@ export class ReceiptLineDto {
   @IsDateString()
   @IsOptional()
   expiry_date?: string;
+
+  @ApiPropertyOptional({
+    type: ReceiptSellPriceDto,
+    isArray: true,
+    description: 'Selling prices to set with this delivery. Units not listed keep their price.',
+  })
+  @IsArray()
+  @ArrayMaxSize(20)
+  @ValidateNested({ each: true })
+  @Type(() => ReceiptSellPriceDto)
+  @IsOptional()
+  sell_prices?: ReceiptSellPriceDto[];
+
+  @ApiPropertyOptional({
+    enum: ['now', 'after_old_stock'],
+    default: 'now',
+    description:
+      '"now" changes the price immediately; "after_old_stock" waits until the ' +
+      'stock that was there before this delivery has sold out.',
+  })
+  @IsIn(['now', 'after_old_stock'])
+  @IsOptional()
+  price_when?: 'now' | 'after_old_stock';
 }
 
 export class CreateReceiptDto {

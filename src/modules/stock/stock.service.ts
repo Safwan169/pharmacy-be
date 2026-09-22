@@ -6,6 +6,7 @@ import {
 } from '@nestjs/common';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import { DataSource, EntityManager, Repository } from 'typeorm';
+import { PendingPriceService } from '../pricing/pending-price.service';
 import { ProductVariant } from '../product-variants/entities/product-variant.entity';
 import { StockBatch } from './entities/stock-batch.entity';
 import { MovementType, StockMovement } from './entities/stock-movement.entity';
@@ -44,6 +45,7 @@ export class StockService {
     @InjectDataSource() private readonly dataSource: DataSource,
     @InjectRepository(StockBatch)
     private readonly batchesRepository: Repository<StockBatch>,
+    private readonly pendingPrices: PendingPriceService,
   ) {}
 
   /**
@@ -280,6 +282,7 @@ export class StockService {
         'Batches hold less than the recorded total. Reload and try again.',
       );
     }
+    await this.pendingPrices.activateIfDue(manager, variantId, userId);
   }
 
   /** Zeroes a batch that has expired (or been damaged). */
@@ -309,6 +312,7 @@ export class StockService {
         userId,
       });
       batch.quantity = 0;
+      await this.pendingPrices.activateIfDue(manager, batch.variantId, userId);
       return batch;
     });
   }

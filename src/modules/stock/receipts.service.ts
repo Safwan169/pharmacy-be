@@ -9,6 +9,7 @@ import { DataSource, In, Repository } from 'typeorm';
 import { nextDocumentNumber } from '../../common/document-number';
 import { PaginatedDto, paginate } from '../../common/dto/paginated.dto';
 import { fromMinorUnits, toMinorUnits } from '../../common/money';
+import { PendingPriceService } from '../pricing/pending-price.service';
 import { ProductVariant } from '../product-variants/entities/product-variant.entity';
 import {
   CreateReceiptDto,
@@ -49,6 +50,7 @@ export class ReceiptsService {
     @InjectRepository(StockMovement)
     private readonly movementsRepository: Repository<StockMovement>,
     private readonly stockService: StockService,
+    private readonly pendingPrices: PendingPriceService,
   ) {}
 
   async create(dto: CreateReceiptDto, userId: number): Promise<StockReceipt> {
@@ -168,6 +170,21 @@ export class ReceiptsService {
             lineCost: fromMinorUnits(lineCostMinor),
           }),
         );
+
+        // Selling price set at the door: now, or once the older packs are gone.
+        if (line.sell_prices && line.sell_prices.length > 0) {
+          if (line.price_when === 'after_old_stock') {
+            await this.pendingPrices.schedule(manager, variant.id, batch.id, line.sell_prices, userId);
+          } else {
+            await this.pendingPrices.applyNow(
+              manager,
+              variant.id,
+              line.sell_prices,
+              userId,
+              `set at delivery ${receipt.receiptNumber}`,
+            );
+          }
+        }
       }
 
       // Payment at the door. Nothing sent = paid in full (a cash purchase);

@@ -22,6 +22,9 @@ export class SettingsDto {
 
   @ApiProperty({ example: '80', enum: ['58', '80'] })
   receipt_width_mm!: string;
+
+  @ApiProperty({ example: '12', description: 'Suggested profit % over cost when pricing at delivery. Empty = no suggestion.' })
+  default_markup_percent!: string;
 }
 
 export class UpdateSettingsDto {
@@ -64,4 +67,9 @@ export class UpdateSettingsDto {
   @IsIn(['58', '80'])
   @IsOptional()
   receipt_width_mm?: string;
+
+  @ApiPropertyOptional({ description: 'Number 0–500 with up to 2 decimals, or empty.' })
+  @Matches(/^(\d{1,3}(\.\d{1,2})?)?$/, { message: 'default_markup_percent must be a number or empty' })
+  @IsOptional()
+  default_markup_percent?: string;
 }

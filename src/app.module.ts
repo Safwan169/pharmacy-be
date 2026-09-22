@@ -10,6 +10,7 @@ import { GenericsModule } from './modules/generics/generics.module';
 import { ImportModule } from './modules/import/import.module';
 import { ManufacturersModule } from './modules/manufacturers/manufacturers.module';
 import { ProductVariantsModule } from './modules/product-variants/product-variants.module';
+import { PricingModule } from './modules/pricing/pricing.module';
 import { ProductsModule } from './modules/products/products.module';
 import { ReportsModule } from './modules/reports/reports.module';
 import { SalesModule } from './modules/sales/sales.module';
@@ -36,6 +37,7 @@ import { UsersModule } from './modules/users/users.module';
     ManufacturersModule,
     GenericsModule,
     ProductsModule,
+    PricingModule,
     ProductVariantsModule,
     ImportModule,
     SuppliersModule,

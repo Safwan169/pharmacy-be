@@ -15,6 +15,7 @@ import {
 import { numericTransformer } from '../../../common/transformers/numeric.transformer';
 import { Generic } from '../../generics/entities/generic.entity';
 import { Product } from '../../products/entities/product.entity';
+import type { VariantPendingPrice } from '../../pricing/entities/variant-pending-price.entity';
 import { StockBatch } from '../../stock/entities/stock-batch.entity';
 import { VariantUnit } from './variant-unit.entity';
 
@@ -109,6 +110,10 @@ export class ProductVariant {
   })
   @OneToMany(() => StockBatch, (batch) => batch.variant)
   batches?: StockBatch[];
+
+  /** Only on GET /variants/:id: a price change waiting for old stock to sell out. */
+  @ApiPropertyOptional({ nullable: true, description: 'Only on GET /variants/:id. Price change waiting for old stock to sell out.' })
+  pendingPrice?: VariantPendingPrice | null;
 
   @ApiPropertyOptional({
     example: 40.12,

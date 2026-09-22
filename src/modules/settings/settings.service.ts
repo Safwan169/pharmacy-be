@@ -13,6 +13,7 @@ export const SETTING_KEYS = [
   'receipt_footer',
   'low_stock_threshold',
   'receipt_width_mm',
+  'default_markup_percent',
 ] as const;
 export type SettingKey = (typeof SETTING_KEYS)[number];
 export type ShopSettings = Record<SettingKey, string>;
@@ -25,6 +26,7 @@ const DEFAULTS: ShopSettings = {
   receipt_footer: '',
   low_stock_threshold: '',
   receipt_width_mm: '80',
+  default_markup_percent: '',
 };
 
 /**

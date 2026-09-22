@@ -11,6 +11,7 @@ import { adjustCustomerBalance } from '../customers/customer-balance';
 import { Customer } from '../customers/entities/customer.entity';
 import { ProductVariant } from '../product-variants/entities/product-variant.entity';
 import { VariantUnit } from '../product-variants/entities/variant-unit.entity';
+import { PendingPriceService } from '../pricing/pending-price.service';
 import { BatchAllocation, StockService } from '../stock/stock.service';
 import { computeCheckoutTotals, formatInvoiceNumber } from './checkout-totals';
 import { CheckoutItemFailureDto } from './dto/checkout-failure.dto';
@@ -38,6 +39,7 @@ export class SalesService {
     @InjectDataSource() private readonly dataSource: DataSource,
     @InjectRepository(Sale) private readonly salesRepository: Repository<Sale>,
     private readonly stockService: StockService,
+    private readonly pendingPrices: PendingPriceService,
   ) {}
 
   /**
@@ -273,6 +275,10 @@ export class SalesService {
         );
       }
       await manager.save(items);
+      // A parked price change goes live the moment the old batches are gone.
+      for (const { item } of ordered) {
+        await this.pendingPrices.activateIfDue(manager, item.variant_id, userId);
+      }
       return sale.id;
     });
 

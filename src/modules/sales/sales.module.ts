@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { ProductVariant } from '../product-variants/entities/product-variant.entity';
+import { PricingModule } from '../pricing/pricing.module';
 import { StockModule } from '../stock/stock.module';
 import { InvoiceSequence } from './entities/invoice-sequence.entity';
 import { SaleItem } from './entities/sale-item.entity';
@@ -23,6 +24,7 @@ import { SalesService } from './sales.service';
       ProductVariant,
     ]),
     StockModule,
+    PricingModule,
   ],
   controllers: [SalesController],
   providers: [SalesService, InvoicePdfService, ReceiptPdfService, ReturnsService],

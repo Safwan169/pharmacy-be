@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { PricingModule } from '../pricing/pricing.module';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { ProductVariant } from '../product-variants/entities/product-variant.entity';
 import { StockBatch } from './entities/stock-batch.entity';
@@ -23,6 +24,7 @@ import { StockService } from './stock.service';
       StockReceiptItem,
       ProductVariant,
     ]),
+    PricingModule,
   ],
   controllers: [StockController],
   providers: [StockService, ExpiryService, ReceiptsService],
