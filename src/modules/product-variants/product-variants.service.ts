@@ -236,6 +236,40 @@ export class ProductVariantsService {
     return this.findOne(id);
   }
 
+  /**
+   * The counter's quick-pick tiles: what this shop actually sells, most-sold
+   * first, so the common medicines need no typing. Falls back to nothing when
+   * the shop is new — the search box still works.
+   */
+  async favourites(limit: number, days: number): Promise<ProductVariant[]> {
+    const rows = (await this.dataSource.query(
+      `SELECT si.product_variant_id AS id, SUM(si.quantity) AS sold
+         FROM sale_items si
+         JOIN sales s ON s.id = si.sale_id
+        WHERE s.created_at >= now() - ($1 || ' days')::interval
+          AND s.status <> 'voided'
+        GROUP BY si.product_variant_id
+        ORDER BY sold DESC
+        LIMIT $2`,
+      [String(days), limit],
+    )) as { id: number; sold: string }[];
+    if (rows.length === 0) return [];
+
+    const ids = rows.map((r) => r.id);
+    const variants = await this.baseQuery()
+      .where('variant.id IN (:...ids)', { ids })
+      .andWhere('variant.isActive = true')
+      .andWhere('variant.price IS NOT NULL')
+      .orderBy('unit.sortOrder', 'ASC')
+      .getMany();
+    // Keep the sold-most-first order the SQL worked out.
+    const rank = new Map(ids.map((id, i) => [id, i]));
+    variants.sort((a, b) => (rank.get(a.id) ?? 0) - (rank.get(b.id) ?? 0));
+    const pending = await this.pendingPrices.forVariants(this.dataSource.manager, variants.map((v) => v.id));
+    for (const v of variants) v.pendingPrice = pending.get(v.id) ?? null;
+    return variants;
+  }
+
   async findOne(id: number): Promise<ProductVariant> {
     const variant = await this.baseQuery()
       .where('variant.id = :id', { id })

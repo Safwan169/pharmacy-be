@@ -100,6 +100,23 @@ export class ProductVariantsController {
     return this.variantsService.bulkPrice(dto, user.id);
   }
 
+  @Get('favourites')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary: 'Most-sold medicines, for the counter’s quick-pick tiles',
+    description: 'Priced, active SKUs ordered by units sold in the last `days` days.',
+  })
+  @ApiQuery({ name: 'limit', required: false, example: 18 })
+  @ApiQuery({ name: 'days', required: false, example: 30 })
+  @ApiOkResponse({ type: ProductVariant, isArray: true })
+  favourites(
+    @Query('limit', new ParseIntPipe({ optional: true })) limit = 18,
+    @Query('days', new ParseIntPipe({ optional: true })) days = 30,
+  ): Promise<ProductVariant[]> {
+    return this.variantsService.favourites(Math.min(Math.max(limit, 1), 40), Math.min(Math.max(days, 1), 365));
+  }
+
   @Get('unit-templates')
   @ApiOperation({
     summary: 'Suggested sellable-unit ladder for a dosage form',
