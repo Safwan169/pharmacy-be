@@ -1,5 +1,7 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
+import { Transform } from 'class-transformer';
 import {
+  IsBoolean,
   IsDateString,
   IsIn,
   IsOptional,
@@ -18,13 +20,27 @@ export class ListSalesQueryDto extends PaginationQueryDto {
   status?: string;
 
   @ApiPropertyOptional({
-    description: 'Case-insensitive substring match on the invoice number.',
-    example: 'INV-20260817',
+    description:
+      'Case-insensitive substring match on the invoice number, the customer ' +
+      "name or phone, or a medicine sold on the bill — so a counter looking " +
+      'for a sale to reverse can search by what the customer is holding.',
+    example: 'napa',
   })
   @IsString()
-  @MaxLength(50)
+  @MaxLength(100)
   @IsOptional()
   search?: string;
+
+  @ApiPropertyOptional({
+    description:
+      'Include each sale\'s line items. The counter needs them to offer a ' +
+      'return without a second request per sale.',
+    default: false,
+  })
+  @Transform(({ value }) => value === true || value === 'true' || value === '1')
+  @IsBoolean()
+  @IsOptional()
+  with_items?: boolean;
 
   @ApiPropertyOptional({
     description:

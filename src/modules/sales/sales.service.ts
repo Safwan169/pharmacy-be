@@ -342,9 +342,18 @@ export class SalesService {
     }
 
     if (query.search !== undefined) {
-      qb.andWhere('sale.invoiceNumber ILIKE :search', {
-        search: `%${query.search}%`,
-      });
+      // Whoever is at the counter rarely has the invoice number — they have a
+      // strip of medicine, or a phone number. Any of the three finds the sale.
+      qb.andWhere(
+        `(sale.invoiceNumber ILIKE :search
+          OR customer.name ILIKE :search
+          OR customer.phone ILIKE :search
+          OR EXISTS (
+            SELECT 1 FROM sale_items si
+            WHERE si.sale_id = sale.id AND si.brand_name_snapshot ILIKE :search
+          ))`,
+        { search: `%${query.search}%` },
+      );
     }
     if (query.status !== undefined && query.status !== 'all') {
       qb.andWhere('sale.status = :status', { status: query.status });
@@ -370,6 +379,17 @@ export class SalesService {
       .take(query.limit);
 
     const [data, total] = await qb.getManyAndCount();
+    if (query.with_items === true && data.length > 0) {
+      // Loaded separately rather than joined: a join would make `take` count
+      // line items instead of sales and quietly shorten the page.
+      const items = await this.dataSource.getRepository(SaleItem).find({
+        where: { saleId: In(data.map((sale) => sale.id)) },
+        order: { id: 'ASC' },
+      });
+      for (const sale of data) {
+        sale.items = items.filter((item) => item.saleId === sale.id);
+      }
+    }
     return paginate(data, total, query.page, query.limit);
   }
 
