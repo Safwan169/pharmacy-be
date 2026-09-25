@@ -63,8 +63,22 @@ export class DailyClosingDto {
   @ApiProperty({ type: MethodBreakdownDto }) by_method!: MethodBreakdownDto;
   @ApiProperty({ description: 'Refunds paid out, by method.' }) refunds_by_method!: { cash: number; bkash: number; due_adjust: number };
   @ApiProperty({ description: 'Due balances collected today, by method.' }) due_collected!: { cash: number; bkash: number };
-  @ApiProperty({ description: 'Paid to suppliers today (at deliveries and against balances), by method.' }) supplier_paid!: { cash: number; bkash: number };
-  @ApiProperty({ description: 'Cash sales + cash due collections - cash refunds - cash paid to suppliers.' }) cash_in_drawer_expected!: number;
+  @ApiProperty({
+    description:
+      'Paid to suppliers today (at deliveries and against balances), by method. ' +
+      '`cash_outside` is the part of `cash` that came from a bank account or the ' +
+      "owner's pocket rather than the drawer.",
+  })
+  supplier_paid!: { cash: number; bkash: number; cash_outside: number };
+  @ApiProperty({
+    nullable: true,
+    description:
+      'Cash the drawer should have held when the day started: everything it has ' +
+      'taken in and paid out since the shop began. Null on a single cashier’s ' +
+      'view, where a shop-wide balance would mean nothing.',
+  })
+  opening_cash!: number | null;
+  @ApiProperty({ description: 'opening_cash + cash sales + cash due collections - cash refunds - cash paid to suppliers out of the drawer.' }) cash_in_drawer_expected!: number;
   @ApiProperty() voided_count!: number;
   @ApiProperty({ type: ClosingTopItemDto, isArray: true }) top_items!: ClosingTopItemDto[];
   @ApiProperty({ type: ClosingCashierDto, isArray: true }) cashier_breakdown!: ClosingCashierDto[];

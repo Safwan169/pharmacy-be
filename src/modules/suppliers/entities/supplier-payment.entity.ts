@@ -61,6 +61,16 @@ export class SupplierPayment {
   @Column({ type: 'varchar', length: 10 })
   method!: SupplierPaymentMethod;
 
+  @ApiProperty({
+    default: true,
+    description:
+      "Whether the money left the shop's cash drawer. False when it came from " +
+      'somewhere else — a bank account, or the owner\'s own pocket — in which ' +
+      "case it must not be deducted from the day's expected cash.",
+  })
+  @Column({ name: 'from_drawer', type: 'boolean', default: true })
+  fromDrawer!: boolean;
+
   @ApiPropertyOptional({ nullable: true, description: 'bKash TrxID, cheque number…' })
   @Column({ type: 'varchar', length: 50, nullable: true })
   reference!: string | null;

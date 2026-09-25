@@ -4,6 +4,7 @@ import {
   ArrayMaxSize,
   ArrayNotEmpty,
   IsArray,
+  IsBoolean,
   IsDateString,
   IsIn,
   IsInt,
@@ -166,6 +167,16 @@ export class CreateReceiptDto {
   @IsIn(['cash', 'bkash'])
   @IsOptional()
   paid_method?: 'cash' | 'bkash';
+
+  @ApiPropertyOptional({
+    default: true,
+    description:
+      "True when the cash came out of the shop's drawer, false when it came " +
+      'from a bank account or the owner\'s pocket. Only affects the daily cash count.',
+  })
+  @IsBoolean()
+  @IsOptional()
+  paid_from_drawer?: boolean;
 
   @ApiProperty({ type: ReceiptLineDto, isArray: true, minItems: 1 })
   @IsArray()

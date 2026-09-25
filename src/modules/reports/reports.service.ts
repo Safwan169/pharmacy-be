@@ -22,6 +22,24 @@ const n = (v: unknown): number => Number(v ?? 0);
  * totals from `sales`, lines from `sale_items` — never a join that would
  * count a total once per line.
  */
+/**
+ * Everything the drawer took in and paid out before a given instant. The shop
+ * opened with nothing, so the running total is the opening balance — no count
+ * and no typing, which is the point.
+ */
+const OPENING_CASH_SQL = `
+  SELECT
+    (SELECT COALESCE(SUM(total_amount), 0) FROM sales
+      WHERE status <> 'voided' AND payment_method = 'cash' AND created_at < $1)
+  + (SELECT COALESCE(SUM(amount), 0) FROM due_payments
+      WHERE method = 'cash' AND created_at < $1)
+  - (SELECT COALESCE(SUM(refund_amount), 0) FROM sale_returns
+      WHERE refund_method = 'cash' AND created_at < $1)
+  - (SELECT COALESCE(SUM(amount), 0) FROM supplier_payments
+      WHERE method = 'cash' AND from_drawer = true AND created_at < $1)
+  AS opening_cash
+`;
+
 @Injectable()
 export class ReportsService {
   constructor(@InjectDataSource() private readonly dataSource: DataSource) {}
@@ -66,15 +84,33 @@ export class ReportsService {
       params,
     )) as Record<string, string>[];
 
-    // Money handed to suppliers today leaves the drawer just like a refund.
+    // Money handed to suppliers today leaves the drawer just like a refund —
+    // unless it never came from the drawer, which the payment itself records.
     const [supplierPaid] = (await this.dataSource.query(
       `SELECT
          COALESCE(SUM(sp.amount) FILTER (WHERE sp.method = 'cash'), 0)  AS cash,
-         COALESCE(SUM(sp.amount) FILTER (WHERE sp.method = 'bkash'), 0) AS bkash
+         COALESCE(SUM(sp.amount) FILTER (WHERE sp.method = 'bkash'), 0) AS bkash,
+         COALESCE(SUM(sp.amount) FILTER (WHERE sp.method = 'cash' AND sp.from_drawer = false), 0) AS cash_outside
        FROM supplier_payments sp
        WHERE sp.created_at >= $1 AND sp.created_at < $2 ${onlyCashierId === undefined ? '' : 'AND sp.created_by = $3'}`,
       params,
     )) as Record<string, string>[];
+
+    // What the drawer had before the day opened: every taking and every payout
+    // since the shop began. Nobody counts or types it, so it can never be
+    // forgotten — and it is what stops a day of heavy supplier payments from
+    // reporting a negative drawer. A single cashier's view has no such balance.
+    const openingCash =
+      onlyCashierId === undefined
+        ? n(
+            (
+              (await this.dataSource.query(OPENING_CASH_SQL, [start])) as Record<
+                string,
+                string
+              >[]
+            )[0].opening_cash,
+          )
+        : null;
 
     const topItems = (await this.dataSource.query(
       `SELECT si.product_variant_id AS variant_id,
@@ -116,9 +152,18 @@ export class ReportsService {
       by_method: { cash: n(totals.cash), bkash: n(totals.bkash), due: n(totals.due) },
       refunds_by_method: { cash: n(refunds.cash), bkash: n(refunds.bkash), due_adjust: n(refunds.due_adjust) },
       due_collected: { cash: n(collected.cash), bkash: n(collected.bkash) },
-      supplier_paid: { cash: n(supplierPaid.cash), bkash: n(supplierPaid.bkash) },
+      supplier_paid: {
+        cash: n(supplierPaid.cash),
+        bkash: n(supplierPaid.bkash),
+        cash_outside: n(supplierPaid.cash_outside),
+      },
+      opening_cash: openingCash,
       cash_in_drawer_expected: round2(
-        n(totals.cash) + n(collected.cash) - n(refunds.cash) - n(supplierPaid.cash),
+        (openingCash ?? 0) +
+          n(totals.cash) +
+          n(collected.cash) -
+          n(refunds.cash) -
+          (n(supplierPaid.cash) - n(supplierPaid.cash_outside)),
       ),
       voided_count: n(totals.voided_count),
       top_items: topItems.map((r) => ({

@@ -248,6 +248,7 @@ export class ReceiptsService {
             paymentNumber: await nextDocumentNumber(manager, PAYMENT_PREFIX),
             amount: fromMinorUnits(paidMinor),
             method: dto.paid_method ?? 'cash',
+            fromDrawer: dto.paid_from_drawer ?? true,
             reference: null,
             note: receipt.receiptNumber,
             balanceAfter,

@@ -36,6 +36,16 @@ export class CreateSupplierPaymentDto {
   @IsIn(['cash', 'bkash'])
   method!: 'cash' | 'bkash';
 
+  @ApiPropertyOptional({
+    default: true,
+    description:
+      "True when the cash came out of the shop's drawer, false when it came " +
+      'from a bank account or the owner\'s pocket. Only affects the daily cash count.',
+  })
+  @IsBoolean()
+  @IsOptional()
+  from_drawer?: boolean;
+
   @ApiPropertyOptional({ maxLength: 50, description: 'bKash TrxID, cheque number…' })
   @IsString()
   @MaxLength(50)

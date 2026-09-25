@@ -131,6 +131,7 @@ export class SuppliersService {
           paymentNumber: await nextDocumentNumber(manager, 'SPY'),
           amount: fromMinorUnits(paidMinor),
           method: dto.method,
+          fromDrawer: dto.from_drawer ?? true,
           reference: dto.reference?.trim() || null,
           note: dto.note?.trim() || null,
           balanceAfter,
