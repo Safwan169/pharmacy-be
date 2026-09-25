@@ -13,6 +13,7 @@ import { RolesGuard } from '../../common/guards/roles.guard';
 import { DashboardService } from './dashboard.service';
 import { DashboardSummaryDto } from './dto/dashboard-summary.dto';
 import { LowStockItemDto } from './dto/low-stock-item.dto';
+import { OutstandingDto } from './dto/outstanding.dto';
 import { SummaryQueryDto } from './dto/summary-query.dto';
 
 @ApiTags('dashboard')
@@ -38,6 +39,20 @@ export class DashboardController {
   @ApiUnauthorizedResponse({ description: 'Missing or invalid token.' })
   lowStock(): Promise<LowStockItemDto[]> {
     return this.dashboardService.lowStock();
+  }
+
+  @Get('outstanding')
+  @Roles('owner')
+  @ApiOperation({
+    summary: 'Money owed to the shop and by it',
+    description:
+      'Current balances, not a period: what customers still owe on account, ' +
+      'what the shop still owes suppliers, and how long each has been waiting.',
+  })
+  @ApiOkResponse({ description: 'Both sides of the credit.', type: OutstandingDto })
+  @ApiUnauthorizedResponse({ description: 'Missing or invalid token.' })
+  outstanding(): Promise<OutstandingDto> {
+    return this.dashboardService.outstanding();
   }
 
   @Get('summary')

@@ -11,6 +11,7 @@ import {
   toInstantWindow,
 } from './date-range';
 import { DashboardSummaryDto } from './dto/dashboard-summary.dto';
+import { OutstandingDto } from './dto/outstanding.dto';
 import { LowStockItemDto } from './dto/low-stock-item.dto';
 import { SummaryQueryDto } from './dto/summary-query.dto';
 
@@ -59,12 +60,40 @@ const SUMMARY_SQL = `
   FROM sale_totals, refund_totals, item_totals
 `;
 
+/**
+ * Credit in both directions, in one round trip. The balances are kept on the
+ * customer and supplier rows, so they are summed directly; the dates come from
+ * the bills behind them, which is what makes "owed since" honest.
+ */
+const OUTSTANDING_SQL = `
+  SELECT
+    (SELECT COALESCE(SUM(due_balance), 0) FROM customers WHERE due_balance > 0) AS customers_owe,
+    (SELECT COUNT(*) FROM customers WHERE due_balance > 0)                      AS customers_count,
+    (SELECT MIN(s.created_at)::date::text
+       FROM sales s JOIN customers c ON c.id = s.customer_id
+      WHERE s.due_amount > 0 AND s.status <> 'voided' AND c.due_balance > 0)    AS customers_oldest,
+    (SELECT COALESCE(SUM(due_balance), 0) FROM suppliers WHERE due_balance > 0) AS shop_owes,
+    (SELECT COUNT(*) FROM suppliers WHERE due_balance > 0)                      AS suppliers_count,
+    (SELECT MIN(r.received_at)::text
+       FROM stock_receipts r JOIN suppliers sp ON sp.id = r.supplier_id
+      WHERE r.paid_amount < r.total_cost AND sp.due_balance > 0)                AS suppliers_oldest
+`;
+
 /** Base units in batches that can still be sold. Mirrors StockService.SELLABLE_BATCH_WHERE. */
 const SELLABLE_STOCK_SQL = `(
   SELECT COALESCE(SUM(b.quantity), 0) FROM stock_batches b
   WHERE b.variant_id = variant.id AND b.quantity > 0
     AND (b.expiry_date IS NULL OR b.expiry_date >= CURRENT_DATE)
 )`;
+
+interface OutstandingRow {
+  customers_owe: string;
+  customers_count: string;
+  customers_oldest: string | null;
+  shop_owes: string;
+  suppliers_count: string;
+  suppliers_oldest: string | null;
+}
 
 /** `pg` hands back NUMERIC and bigint COUNT columns as strings. */
 interface SummaryRow {
@@ -145,6 +174,20 @@ export class DashboardService {
       total_units_sold: Number(row.total_units_sold),
       total_transactions: Number(row.total_transactions),
       distinct_products_sold: Number(row.distinct_products_sold),
+    };
+  }
+
+  /** What the shop is owed and what it owes, as of now. */
+  async outstanding(): Promise<OutstandingDto> {
+    const rows: OutstandingRow[] = await this.dataSource.query(OUTSTANDING_SQL);
+    const row = rows[0];
+    return {
+      customers_owe: Number(row.customers_owe),
+      customers_count: Number(row.customers_count),
+      customers_oldest: row.customers_oldest,
+      shop_owes: Number(row.shop_owes),
+      suppliers_count: Number(row.suppliers_count),
+      suppliers_oldest: row.suppliers_oldest,
     };
   }
 
