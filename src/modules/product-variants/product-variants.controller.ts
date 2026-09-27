@@ -36,7 +36,9 @@ import { UnitTemplatesQueryDto } from './dto/unit-templates-query.dto';
 import { UpdatePricingDto } from './dto/update-pricing.dto';
 import { CreateVariantDto } from './dto/create-variant.dto';
 import { BulkPriceDto, BulkPricePreviewDto } from './dto/bulk-price.dto';
+import { CreateBarcodeDto } from './dto/barcode.dto';
 import { ProductVariant } from './entities/product-variant.entity';
+import { VariantBarcode } from './entities/variant-barcode.entity';
 import { ProductVariantsService } from './product-variants.service';
 
 @ApiTags('variants')
@@ -98,6 +100,65 @@ export class ProductVariantsController {
     @CurrentUser() user: AuthenticatedUser,
   ): Promise<BulkPricePreviewDto> {
     return this.variantsService.bulkPrice(dto, user.id);
+  }
+
+  @Get('by-barcode/:code')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary: 'The medicine a scanned code belongs to',
+    description:
+      'The catalogue ships without barcodes, so a code is only known once ' +
+      'someone has paired it. A 404 with reason `unknown_barcode` is the ' +
+      'normal first answer for a new pack — the counter then offers to learn it.',
+  })
+  @ApiOkResponse({ type: ProductVariant })
+  @ApiNotFoundResponse({ description: 'Nothing is paired with that code yet.' })
+  findByBarcode(@Param('code') code: string): Promise<ProductVariant> {
+    return this.variantsService.findByBarcode(code);
+  }
+
+  @Get(':id/barcodes')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Codes that open this medicine' })
+  @ApiOkResponse({ type: VariantBarcode, isArray: true })
+  barcodes(@Param('id', ParseIntPipe) id: number): Promise<VariantBarcode[]> {
+    return this.variantsService.barcodesFor(id);
+  }
+
+  @Post(':id/barcodes')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary: 'Teach the shop a code',
+    description:
+      'Pairs a scanned code with this medicine. Pairing the same code again ' +
+      'is a no-op; a code already on another medicine is refused.',
+  })
+  @ApiCreatedResponse({ type: VariantBarcode })
+  @ApiConflictResponse({ description: 'That code belongs to another medicine (reason: barcode_taken).' })
+  @ApiNotFoundResponse({ description: 'No variant with that id.' })
+  addBarcode(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: CreateBarcodeDto,
+    @CurrentUser() user: AuthenticatedUser,
+  ): Promise<VariantBarcode> {
+    return this.variantsService.addBarcode(id, dto, user.id);
+  }
+
+  @Delete(':id/barcodes/:barcodeId')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('owner')
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Forget a code paired by mistake' })
+  @ApiOkResponse({ description: 'Removed.' })
+  @ApiNotFoundResponse({ description: 'That code is not on this medicine.' })
+  removeBarcode(
+    @Param('id', ParseIntPipe) id: number,
+    @Param('barcodeId', ParseIntPipe) barcodeId: number,
+  ): Promise<void> {
+    return this.variantsService.removeBarcode(id, barcodeId);
   }
 
   @Get('favourites')

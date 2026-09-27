@@ -30,7 +30,9 @@ import { CreateVariantDto } from './dto/create-variant.dto';
 import { Product } from '../products/entities/product.entity';
 import { Manufacturer } from '../manufacturers/entities/manufacturer.entity';
 import { Generic } from '../generics/entities/generic.entity';
+import { CreateBarcodeDto, normaliseBarcode } from './dto/barcode.dto';
 import { ProductVariant } from './entities/product-variant.entity';
+import { VariantBarcode } from './entities/variant-barcode.entity';
 import { VariantUnit } from './entities/variant-unit.entity';
 
 @Injectable()
@@ -39,6 +41,8 @@ export class ProductVariantsService {
     @InjectDataSource() private readonly dataSource: DataSource,
     @InjectRepository(ProductVariant)
     private readonly variantsRepository: Repository<ProductVariant>,
+    @InjectRepository(VariantBarcode)
+    private readonly barcodesRepository: Repository<VariantBarcode>,
     private readonly stockService: StockService,
     private readonly auditService: AuditService,
     private readonly pendingPrices: PendingPriceService,
@@ -268,6 +272,89 @@ export class ProductVariantsService {
     const pending = await this.pendingPrices.forVariants(this.dataSource.manager, variants.map((v) => v.id));
     for (const v of variants) v.pendingPrice = pending.get(v.id) ?? null;
     return variants;
+  }
+
+  /**
+   * The scanner's lookup. A code nobody has paired yet is not an error the
+   * counter should hide — it is the moment to learn it, so the failure says
+   * exactly that and hands the code back.
+   */
+  async findByBarcode(rawCode: string): Promise<ProductVariant> {
+    const code = normaliseBarcode(rawCode);
+    const row = await this.barcodesRepository.findOne({ where: { code } });
+    if (!row) {
+      throw new NotFoundException({
+        message: `No medicine is paired with ${code} yet.`,
+        reason: 'unknown_barcode',
+        code,
+      });
+    }
+    return this.findOne(row.variantId);
+  }
+
+  /** Every code that opens this medicine, newest first. */
+  barcodesFor(variantId: number): Promise<VariantBarcode[]> {
+    return this.barcodesRepository.find({
+      where: { variantId },
+      order: { id: 'DESC' },
+    });
+  }
+
+  /**
+   * Teaches the shop a code. Scanning the same pack twice is a no-op rather
+   * than an error — at a counter that is the likelier accident — but a code
+   * already pointing at a different medicine is refused by name, since
+   * silently moving it would start selling the wrong box.
+   */
+  async addBarcode(
+    variantId: number,
+    dto: CreateBarcodeDto,
+    userId: number | null,
+  ): Promise<VariantBarcode> {
+    const code = normaliseBarcode(dto.code);
+    if (code.length < 4) {
+      throw new BadRequestException('That code is too short to be a barcode.');
+    }
+    const variant = await this.variantsRepository.findOne({
+      where: { id: variantId },
+      relations: { product: true },
+    });
+    if (!variant) throw new NotFoundException(`Product variant ${variantId} not found`);
+
+    const existing = await this.barcodesRepository.findOne({ where: { code } });
+    if (existing) {
+      if (existing.variantId === variantId) return existing;
+      // Only worth a second query on the rare path, and the name is what makes
+      // the refusal act on: "that code is Napa's" beats "already in use".
+      const owner = await this.variantsRepository.findOne({
+        where: { id: existing.variantId },
+        relations: { product: true },
+      });
+      const name = owner
+        ? `${owner.product.brandName}${owner.strength ? ` ${owner.strength}` : ''}`
+        : `variant ${existing.variantId}`;
+      throw new ConflictException({
+        message: `${code} already belongs to ${name}.`,
+        reason: 'barcode_taken',
+        variant_id: existing.variantId,
+      });
+    }
+
+    return this.barcodesRepository.save(
+      this.barcodesRepository.create({
+        variantId,
+        code,
+        note: dto.note?.trim() || null,
+        createdById: userId,
+      }),
+    );
+  }
+
+  async removeBarcode(variantId: number, barcodeId: number): Promise<void> {
+    const result = await this.barcodesRepository.delete({ id: barcodeId, variantId });
+    if (result.affected === 0) {
+      throw new NotFoundException(`Barcode ${barcodeId} not found on variant ${variantId}`);
+    }
   }
 
   async findOne(id: number): Promise<ProductVariant> {

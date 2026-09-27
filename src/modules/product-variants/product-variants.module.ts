@@ -3,12 +3,17 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { ProductVariant } from './entities/product-variant.entity';
 import { PricingModule } from '../pricing/pricing.module';
 import { StockModule } from '../stock/stock.module';
+import { VariantBarcode } from './entities/variant-barcode.entity';
 import { VariantUnit } from './entities/variant-unit.entity';
 import { ProductVariantsController } from './product-variants.controller';
 import { ProductVariantsService } from './product-variants.service';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([ProductVariant, VariantUnit]), StockModule, PricingModule],
+  imports: [
+    TypeOrmModule.forFeature([ProductVariant, VariantUnit, VariantBarcode]),
+    StockModule,
+    PricingModule,
+  ],
   controllers: [ProductVariantsController],
   providers: [ProductVariantsService],
   // Exported so GenericsModule can reuse the variant listing for its
