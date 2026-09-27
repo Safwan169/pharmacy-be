@@ -11,6 +11,7 @@ import {
 } from 'typeorm';
 import { User } from '../../auth/entities/user.entity';
 import { ProductVariant } from './product-variant.entity';
+import { VariantUnit } from './variant-unit.entity';
 
 /**
  * A code printed on a pack, tied to the medicine inside it. Learned at the
@@ -39,6 +40,20 @@ export class VariantBarcode {
   })
   @Column({ type: 'varchar', length: 64 })
   code!: string;
+
+  @ApiPropertyOptional({
+    nullable: true,
+    example: 7,
+    description:
+      'The unit this code is printed on — a box barcode should ring up a box, ' +
+      'not the tablet inside it. Null when it was paired without knowing.',
+  })
+  @Column({ name: 'unit_id', type: 'integer', nullable: true })
+  unitId!: number | null;
+
+  @ManyToOne(() => VariantUnit, { nullable: true, onDelete: 'SET NULL' })
+  @JoinColumn({ name: 'unit_id' })
+  unit!: VariantUnit | null;
 
   @ApiPropertyOptional({
     nullable: true,

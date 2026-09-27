@@ -35,6 +35,12 @@ import { ProductVariant } from './entities/product-variant.entity';
 import { VariantBarcode } from './entities/variant-barcode.entity';
 import { VariantUnit } from './entities/variant-unit.entity';
 
+/** A scan's answer: the medicine, and which of its packs the code is on. */
+export interface ScannedVariant {
+  unit_id: number | null;
+  variant: ProductVariant;
+}
+
 @Injectable()
 export class ProductVariantsService {
   constructor(
@@ -43,6 +49,8 @@ export class ProductVariantsService {
     private readonly variantsRepository: Repository<ProductVariant>,
     @InjectRepository(VariantBarcode)
     private readonly barcodesRepository: Repository<VariantBarcode>,
+    @InjectRepository(VariantUnit)
+    private readonly unitsRepository: Repository<VariantUnit>,
     private readonly stockService: StockService,
     private readonly auditService: AuditService,
     private readonly pendingPrices: PendingPriceService,
@@ -279,7 +287,7 @@ export class ProductVariantsService {
    * counter should hide — it is the moment to learn it, so the failure says
    * exactly that and hands the code back.
    */
-  async findByBarcode(rawCode: string): Promise<ProductVariant> {
+  async findByBarcode(rawCode: string): Promise<ScannedVariant> {
     const code = normaliseBarcode(rawCode);
     const row = await this.barcodesRepository.findOne({ where: { code } });
     if (!row) {
@@ -289,7 +297,7 @@ export class ProductVariantsService {
         code,
       });
     }
-    return this.findOne(row.variantId);
+    return { unit_id: row.unitId, variant: await this.findOne(row.variantId) };
   }
 
   /** Every code that opens this medicine, newest first. */
@@ -340,10 +348,18 @@ export class ProductVariantsService {
       });
     }
 
+    // A unit from another medicine would send the counter to the wrong pack.
+    const unitId =
+      dto.unit_id !== undefined &&
+      (await this.unitsRepository.countBy({ id: dto.unit_id, variantId })) > 0
+        ? dto.unit_id
+        : null;
+
     return this.barcodesRepository.save(
       this.barcodesRepository.create({
         variantId,
         code,
+        unitId,
         note: dto.note?.trim() || null,
         createdById: userId,
       }),

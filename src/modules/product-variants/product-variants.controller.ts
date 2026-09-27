@@ -39,7 +39,7 @@ import { BulkPriceDto, BulkPricePreviewDto } from './dto/bulk-price.dto';
 import { CreateBarcodeDto } from './dto/barcode.dto';
 import { ProductVariant } from './entities/product-variant.entity';
 import { VariantBarcode } from './entities/variant-barcode.entity';
-import { ProductVariantsService } from './product-variants.service';
+import { ProductVariantsService, type ScannedVariant } from './product-variants.service';
 
 @ApiTags('variants')
 @Controller('variants')
@@ -112,9 +112,18 @@ export class ProductVariantsController {
       'someone has paired it. A 404 with reason `unknown_barcode` is the ' +
       'normal first answer for a new pack — the counter then offers to learn it.',
   })
-  @ApiOkResponse({ type: ProductVariant })
+  @ApiOkResponse({
+    description: 'The medicine, plus the unit the code is printed on when known.',
+    schema: {
+      type: 'object',
+      properties: {
+        unit_id: { type: 'number', nullable: true },
+        variant: { $ref: '#/components/schemas/ProductVariant' },
+      },
+    },
+  })
   @ApiNotFoundResponse({ description: 'Nothing is paired with that code yet.' })
-  findByBarcode(@Param('code') code: string): Promise<ProductVariant> {
+  findByBarcode(@Param('code') code: string): Promise<ScannedVariant> {
     return this.variantsService.findByBarcode(code);
   }
 

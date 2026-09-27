@@ -1,5 +1,6 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsOptional, IsString, MaxLength, MinLength } from 'class-validator';
+import { Type } from 'class-transformer';
+import { IsInt, IsOptional, IsString, MaxLength, MinLength } from 'class-validator';
 
 export class CreateBarcodeDto {
   @ApiProperty({
@@ -10,6 +11,17 @@ export class CreateBarcodeDto {
   @MinLength(4)
   @MaxLength(64)
   code!: string;
+
+  @ApiPropertyOptional({
+    example: 7,
+    description:
+      'The unit the code is printed on, so a scan rings up that pack. Must be ' +
+      "one of the medicine's own units.",
+  })
+  @Type(() => Number)
+  @IsInt()
+  @IsOptional()
+  unit_id?: number;
 
   @ApiPropertyOptional({
     example: 'strip',
