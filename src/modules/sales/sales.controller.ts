@@ -162,11 +162,11 @@ export class SalesController {
     @Query() query: ListSalesQueryDto,
     @CurrentUser() user: AuthenticatedUser,
   ): Promise<PaginatedDto<Sale>> {
-    // A cashier sees only what they rang up; the owner sees the whole shop.
-    return this.salesService.findAll(
-      query,
-      user.role === 'owner' ? undefined : user.id,
-    );
+    // A cashier's list is their own day by default. They can still ask for
+    // the whole shop — the counter does, so that whoever is on the till can
+    // take back a medicine a different cashier sold.
+    const wholeShop = user.role === 'owner' || query.scope === 'shop';
+    return this.salesService.findAll(query, wholeShop ? undefined : user.id);
   }
 
   @Get(':id')

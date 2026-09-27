@@ -32,6 +32,20 @@ export class ListSalesQueryDto extends PaginationQueryDto {
   search?: string;
 
   @ApiPropertyOptional({
+    enum: ['mine', 'shop'],
+    default: 'mine',
+    description:
+      "Whose sales to list. A cashier's own by default, since that is the " +
+      'useful view of their own day. `shop` widens it to every till, which a ' +
+      'cashier needs to take back a medicine someone else sold — returns are ' +
+      'open to cashiers, so hiding the bill only stops them serving the ' +
+      'customer. Ignored for the owner, who always sees the whole shop.',
+  })
+  @IsIn(['mine', 'shop'])
+  @IsOptional()
+  scope?: 'mine' | 'shop';
+
+  @ApiPropertyOptional({
     description:
       'Include each sale\'s line items. The counter needs them to offer a ' +
       'return without a second request per sale.',
