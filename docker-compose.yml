@@ -1,0 +1,85 @@
+# The whole shop on one machine: database, API and counter screen.
+#
+# The frontend lives in its own repository, so clone the two side by side and
+# run this from here:
+#
+#   pharmacy/
+#     pharmacy-nest-backend/   <- docker compose up -d --build
+#     pharmacy-fe/
+#
+# Settings come from .env in this folder (copy .env.example). The values that
+# only make sense inside Docker are set below and win over anything in .env,
+# so a file left pointing at a hosted database cannot quietly be used instead.
+
+services:
+  db:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${DB_USERNAME:?set DB_USERNAME in .env}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?set DB_PASSWORD in .env}
+      POSTGRES_DB: ${DB_NAME:?set DB_NAME in .env}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    # Not published: the API reaches it over Docker's own network, and a
+    # machine that already runs Postgres would refuse to start the stack.
+    # For psql or pgAdmin, either `docker compose exec db psql -U ...` or
+    # uncomment this — 127.0.0.1 keeps it off the network either way.
+    # ports:
+    #   - "127.0.0.1:5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  backend:
+    build:
+      context: .
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      NODE_ENV: production
+      PORT: 5002
+      DB_HOST: db
+      DB_PORT: 5432
+      # Postgres on the same private network, so no TLS to negotiate.
+      DB_SSL: "false"
+      BACKUP_DIR: /app/backups
+      # pg_dump and pg_restore are on PATH in this image. Blanked so a Windows
+      # path left in .env cannot send the backup looking for a C:\ drive.
+      PG_DUMP_PATH: ""
+      PG_RESTORE_PATH: ""
+    ports:
+      - "5002:5002"
+    volumes:
+      # Dumps outlive the container; without this a rebuild throws them away.
+      - ./backups:/app/backups
+    depends_on:
+      db:
+        condition: service_healthy
+    # Migrations, then the owner login, then the catalogue if it is still
+    # empty. All three are safe to repeat, so every restart brings a freshly
+    # pulled version of the schema up to date before the API answers anything.
+    command: sh -c "npm run deploy:prepare && node dist/main"
+
+  frontend:
+    build:
+      context: ../pharmacy-fe
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      # Service name, not localhost: the counter screen is rendered on the
+      # server and talks to the API across Docker's own network.
+      API_BASE_URL: http://backend:5002
+      # Turn on once something in front terminates HTTPS, or the session
+      # cookie is refused by the browser.
+      SESSION_COOKIE_SECURE: ${SESSION_COOKIE_SECURE:-false}
+    ports:
+      - "5001:5001"
+    depends_on:
+      - backend
+
+volumes:
+  pgdata:

@@ -138,6 +138,69 @@ Swagger UI: <http://localhost:3000/api/docs>
 Validated with Joi at startup, so a missing or malformed value fails the boot
 immediately rather than surfacing later on a query.
 
+## Deploying with Docker
+
+`docker-compose.yml` here runs the whole shop on one machine: Postgres, this
+API on **5002**, and the counter screen on **5001**. The frontend is a separate
+repository, so clone the two side by side — the compose file builds it from
+`../pharmacy-fe`.
+
+```
+pharmacy/
+  pharmacy-nest-backend/   <- run docker compose from here
+  pharmacy-fe/
+```
+
+```bash
+git clone <backend> pharmacy-nest-backend
+git clone <frontend> pharmacy-fe
+cd pharmacy-nest-backend
+cp .env.example .env        # then fill it in, see below
+docker compose up -d --build
+```
+
+Open <http://SERVER:5001> and sign in with `ADMIN_EMAIL` / `ADMIN_PASSWORD`.
+
+The API container runs `npm run deploy:prepare` before it starts serving:
+migrations, then the owner login, then the catalogue if it is still empty. All
+three are safe to repeat, so pulling a new version and rebuilding is enough to
+apply a migration.
+
+### What to put in `.env`
+
+Only these matter for Docker; the rest of the file is ignored or overridden.
+
+| Variable | What to set |
+| --- | --- |
+| `DB_USERNAME` / `DB_PASSWORD` / `DB_NAME` | Anything you like — they create the database inside the compose stack. **Do not reuse credentials from a hosted database.** |
+| `JWT_SECRET` | A long random value: `node -e "console.log(require('crypto').randomBytes(48).toString('base64url'))"` |
+| `ADMIN_EMAIL` / `ADMIN_PASSWORD` | The owner login created on first boot. |
+| `SESSION_COOKIE_SECURE` | `true` once something in front terminates HTTPS. |
+
+`DB_HOST`, `DB_PORT`, `DB_SSL` and `PORT` are set by the compose file and win
+over whatever the file says, so an `.env` left pointing at a hosted database
+cannot be used by accident.
+
+### Where the data lives
+
+| What | Where |
+| --- | --- |
+| The database | Docker volume `pgdata` — survives `docker compose down`, **not** `down -v` |
+| Backups | `./backups` on the host, written by `POST /admin/backup` |
+
+`pg_dump` and `pg_restore` are installed in the API image, so the backup button
+works. The client major there matches the `postgres:17-alpine` image; if you
+change one, change the other or old dumps will not restore.
+
+Postgres is not published at all — the API reaches it over Docker's private
+network. To poke at it directly: `docker compose exec db psql -U $DB_USERNAME -d $DB_NAME`.
+
+### HTTPS
+
+Nothing here terminates TLS. Put Caddy or nginx in front if the shop reaches it
+over the internet — and note that **scanning with a phone camera only works
+over HTTPS**, so a plain `http://` address disables that button.
+
 ## Data model
 
 ```text
