@@ -11,11 +11,16 @@
 # Settings come from .env in this folder (copy .env.example). The values that
 # only make sense inside Docker are set below and win over anything in .env,
 # so a file left pointing at a hosted database cannot quietly be used instead.
+#
+# Nothing here is built. The images are made on a development machine and
+# pushed to the registry; a shop's server only pulls and runs them, which is
+# why a 2 GB server is enough. `docker-compose.build.yml` adds the build
+# sections back, and is used nowhere but the machine doing the building.
 
 # The API and the backup run the same image with the same settings; only the
 # command differs.
 x-api: &api
-  image: pharmacy-api
+  image: ghcr.io/safwan169/pharmacy-be:${APP_VERSION:-latest}
   restart: unless-stopped
   env_file:
     - .env
@@ -62,8 +67,6 @@ services:
 
   backend:
     <<: *api
-    build:
-      context: .
     ports:
       - "5002:5002"
     depends_on:
@@ -127,8 +130,7 @@ services:
       - offsite_state:/state
 
   frontend:
-    build:
-      context: ../pharmacy-fe
+    image: ghcr.io/safwan169/pharmacy-fe:${APP_VERSION:-latest}
     restart: unless-stopped
     environment:
       NODE_ENV: production

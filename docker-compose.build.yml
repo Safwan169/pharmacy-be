@@ -1,0 +1,19 @@
+# Making the images — never used on a shop's server.
+#
+# `next build` alone wants a gigabyte or two of memory and leaves several more
+# in build caches, which is most of a small VPS. Building here and shipping the
+# result means the shop's server needs neither, and that five shops share one
+# build instead of repeating it five times.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.build.yml build backend frontend
+#   docker compose -f docker-compose.yml -f docker-compose.build.yml push  backend frontend
+#
+# The frontend is a separate repository, cloned beside this one.
+
+services:
+  backend:
+    build:
+      context: .
+  frontend:
+    build:
+      context: ../pharmacy-fe

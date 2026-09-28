@@ -157,15 +157,61 @@ git clone <backend> pharmacy-nest-backend
 git clone <frontend> pharmacy-fe
 cd pharmacy-nest-backend
 cp .env.example .env        # then fill it in, see below
-docker compose up -d --build
+docker login ghcr.io -u <github-username>
+docker compose up -d
 ```
 
 Open <http://SERVER:5001> and sign in with `ADMIN_EMAIL` / `ADMIN_PASSWORD`.
+
+The frontend repository is still cloned beside this one because the build file
+points at it; the server itself only ever pulls images.
 
 The API container runs `npm run deploy:prepare` before it starts serving:
 migrations, then the owner login, then the catalogue if it is still empty. All
 three are safe to repeat, so pulling a new version and rebuilding is enough to
 apply a migration.
+
+### Where the images come from
+
+Nothing is built on a shop's server. `next build` alone wants a gigabyte or two
+of memory and leaves several more behind in build caches — most of a small VPS,
+and five shops would repeat the same build five times. So the images are made
+once on a development machine, pushed to the registry, and a server only pulls
+and runs them.
+
+**On the machine doing the building** (both repositories cloned side by side):
+
+```bash
+docker login ghcr.io -u <github-username>        # once, a token with write:packages
+export APP_VERSION=v2                            # bump on every release
+docker compose -f docker-compose.yml -f docker-compose.build.yml build backend frontend
+docker compose -f docker-compose.yml -f docker-compose.build.yml push  backend frontend
+```
+
+**On the shop's server:**
+
+```bash
+docker login ghcr.io -u <github-username>        # once, a token with read:packages
+sed -i 's/^APP_VERSION=.*/APP_VERSION=v2/' .env
+docker compose pull
+docker compose up -d
+```
+
+Half a minute, and the server never needs the source, npm or a compiler.
+
+### Going back a version
+
+`APP_VERSION` in `.env` is the whole mechanism. A release that misbehaves is
+undone by naming the one before it:
+
+```bash
+sed -i 's/^APP_VERSION=.*/APP_VERSION=v1/' .env
+docker compose up -d
+```
+
+Seconds, with no build and no git. This is the reason to bump the version on
+every release rather than pushing over `latest` — a tag that always means the
+newest thing cannot be rolled back to.
 
 ### What to put in `.env`
 
