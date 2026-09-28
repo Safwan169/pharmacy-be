@@ -5,6 +5,7 @@ import { formatAmount } from '../../common/money';
 import { SettingsService, ShopSettings } from '../settings/settings.service';
 import { splitUnitMarker } from './receipt-pdf.service';
 import { Sale } from './entities/sale.entity';
+import { drawQr } from './qr';
 
 /**
  * pdfkit's built-in fonts (Helvetica et al.) are WinAnsi-encoded and have no
@@ -124,8 +125,14 @@ export class InvoicePdfService {
     doc.moveDown(1);
 
     doc.fontSize(10);
+    const detailsTop = doc.y;
     doc.text(`Invoice number: ${sale.invoiceNumber}`);
     doc.text(`Date: ${formatDateTime(sale.createdAt)}`);
+    // The same code the thermal receipt carries, so either piece of paper the
+    // customer kept opens the bill when it is scanned at the counter.
+    const size = 56;
+    drawQr(doc, sale.invoiceNumber, doc.page.width - doc.page.margins.right - size, detailsTop, size);
+    doc.y = Math.max(doc.y, detailsTop + size);
     doc.moveDown(1);
   }
 

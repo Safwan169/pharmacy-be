@@ -5,6 +5,7 @@ import { formatAmount } from '../../common/money';
 import { DuePayment } from '../customers/entities/customer.entity';
 import { SettingsService, ShopSettings } from '../settings/settings.service';
 import { Sale } from './entities/sale.entity';
+import { drawQr } from './qr';
 
 const MM = 72 / 25.4;
 const TAKA_SIGN = '৳';
@@ -80,6 +81,7 @@ export class ReceiptPdfService {
           this.kv(doc, 'Total due', this.money(sale.customer.dueBalance), w);
         }
       }
+      this.invoiceCode(doc, sale.invoiceNumber, w);
       this.footer(doc, settings, w);
     });
   }
@@ -154,6 +156,29 @@ export class ReceiptPdfService {
     if (s.shop_phone) doc.text(`Phone: ${s.shop_phone}`, x, doc.y, { align: 'center', width: w });
     if (s.drug_license_no) doc.text(`Drug Licence: ${s.drug_license_no}`, x, doc.y, { align: 'center', width: w });
     doc.moveDown(0.3);
+  }
+
+  /**
+   * The invoice number, as a code the counter can scan off the paper.
+   *
+   * A customer bringing medicine back almost never remembers the number and
+   * often cannot read it out; scanning the receipt opens the right bill at
+   * once. It is a QR rather than a barcode because seventeen characters of
+   * barcode will not fit across a 58 mm receipt, and the phone camera the
+   * shop already uses reads QR.
+   */
+  private invoiceCode(doc: PDFKit.PDFDocument, invoiceNumber: string, w: number): void {
+    const size = Math.min(70, w * 0.45);
+    doc.moveDown(0.5);
+    const top = doc.y;
+    drawQr(doc, invoiceNumber, this.left(doc) + (w - size) / 2, top, size);
+    // Rectangles do not move the cursor, so put it back below the code.
+    doc.y = top + size + 2;
+    doc.fontSize(6).text('Scan to return this bill', this.left(doc), doc.y, {
+      align: 'center',
+      width: w,
+    });
+    doc.fontSize(8);
   }
 
   private footer(doc: PDFKit.PDFDocument, s: ShopSettings, w: number): void {
