@@ -236,10 +236,18 @@ docker run --rm -it -p 53682:53682 \
 ```
 
 Answer `n` for a new remote, name it `gdrive`, choose `drive` (Google Drive),
-leave client id and secret blank, pick scope `1` (full access), and say yes to
-the browser step — it opens a Google sign-in on `localhost:53682`. That writes
-`rclone/rclone.conf`, which holds a token for the account and is gitignored;
-treat it like a password.
+leave client id and secret blank, and say yes to the browser step — it opens a
+Google sign-in on `localhost:53682`.
+
+For scope, pick **`3` (`drive.file`)**: rclone may then touch only the files it
+created itself, which is all a backup needs, and a stolen config cannot reach
+the rest of the Drive. `1` grants the whole Drive and is the fallback if
+anything misbehaves.
+
+No Google password is stored anywhere. Signing in returns a token, which is
+what `rclone/rclone.conf` holds — gitignored, and to be treated like a
+password. It can be withdrawn at any time from the Google account's
+"Third-party apps with account access" page without changing the password.
 
 Then name the folder in `.env` and start it:
 
