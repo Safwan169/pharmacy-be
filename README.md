@@ -141,7 +141,8 @@ immediately rather than surfacing later on a query.
 ## Deploying with Docker
 
 `docker-compose.yml` here runs the whole shop on one machine: Postgres, this
-API on **5002**, the counter screen on **5001**, and a nightly backup. The frontend is a separate
+API on **5002**, the counter screen on **5001**, a nightly backup and a copy of
+it on Google Drive. The frontend is a separate
 repository, so clone the two side by side — the compose file builds it from
 `../pharmacy-fe`.
 
@@ -215,9 +216,45 @@ docker compose exec backend \
   node dist/database/seeds/backup.script.js --restore pharmacy-20260928-0200.dump
 ```
 
-Both the database and the dumps are on the same machine, so a dead disk takes
-both. Copy `backups/` somewhere else — another drive, a pen drive, cloud
-storage — on whatever schedule the shop can keep to.
+### Copying the backups off the machine
+
+The database and its dumps share one disk, so a dead disk takes both. The
+`offsite` service copies the dumps to Google Drive every other day, deletes
+nothing locally, and keeps `OFFSITE_KEEP_DAYS` (default 180) of them there.
+
+It carries them with [rclone](https://rclone.org), so the same setup works for
+Dropbox, OneDrive or S3 — only the remote's name changes. Until it is
+configured the service idles with a message in its log; the rest of the stack
+runs as normal.
+
+**One-time setup.** Signing in to Google needs a browser, so this cannot be
+automatic:
+
+```bash
+docker run --rm -it -p 53682:53682 \
+  -v "$PWD/rclone:/config/rclone" rclone/rclone config
+```
+
+Answer `n` for a new remote, name it `gdrive`, choose `drive` (Google Drive),
+leave client id and secret blank, pick scope `1` (full access), and say yes to
+the browser step — it opens a Google sign-in on `localhost:53682`. That writes
+`rclone/rclone.conf`, which holds a token for the account and is gitignored;
+treat it like a password.
+
+Then name the folder in `.env` and start it:
+
+```bash
+echo 'OFFSITE_REMOTE=gdrive:pharmacy-backups' >> .env
+docker compose up -d offsite
+docker compose logs -f offsite
+```
+
+The folder is created on the first copy. `OFFSITE_EVERY_DAYS` (default 2)
+changes how often it runs; the first copy happens as soon as it starts, and the
+clock survives restarts, so restarting the stack does not re-upload anything.
+
+Nothing about this is the shop's job after setup — but it is worth opening the
+Drive folder once a month to see that dumps are still arriving.
 
 Postgres is not published at all — the API reaches it over Docker's private
 network. To poke at it directly: `docker compose exec db psql -U $DB_USERNAME -d $DB_NAME`.

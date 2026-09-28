@@ -48,3 +48,6 @@ lerna-debug.log*
 
 # Database dumps
 /backups
+
+# rclone config for the offsite copy — holds a Google Drive token.
+/rclone

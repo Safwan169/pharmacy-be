@@ -1,5 +1,5 @@
-# The whole shop on one machine: database, API, counter screen and a nightly
-# backup.
+# The whole shop on one machine: database, API, counter screen, a nightly
+# backup and a copy of it off the machine.
 #
 # The frontend lives in its own repository, so clone the two side by side and
 # run this from here:
@@ -102,6 +102,30 @@ services:
         condition: service_healthy
     command: sh docker/nightly-backup.sh
 
+  # Every other day the dumps are copied to Google Drive, so a dead disk does
+  # not take the database and its backups together. Idles with a message until
+  # rclone is configured, which needs a browser and so cannot be automatic.
+  offsite:
+    image: rclone/rclone:latest
+    restart: unless-stopped
+    environment:
+      TZ: Asia/Dhaka
+      RCLONE_CONFIG: /config/rclone/rclone.conf
+      # e.g. gdrive:pharmacy-backups — the remote you named during setup.
+      OFFSITE_REMOTE: ${OFFSITE_REMOTE:-}
+      OFFSITE_EVERY_DAYS: ${OFFSITE_EVERY_DAYS:-2}
+      OFFSITE_KEEP_DAYS: ${OFFSITE_KEEP_DAYS:-180}
+    entrypoint: /bin/sh
+    command: /scripts/offsite-backup.sh
+    volumes:
+      # Read-only: this only ever carries dumps away, never changes them.
+      - ./backups:/backups:ro
+      # Holds rclone.conf, which carries a Google token — keep it off git.
+      - ./rclone:/config/rclone
+      - ./docker:/scripts:ro
+      # When it last succeeded, so a restart does not mean another upload.
+      - offsite_state:/state
+
   frontend:
     build:
       context: ../pharmacy-fe
@@ -123,3 +147,4 @@ services:
 
 volumes:
   pgdata:
+  offsite_state:
