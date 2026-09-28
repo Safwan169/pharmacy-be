@@ -1,4 +1,5 @@
-# The whole shop on one machine: database, API and counter screen.
+# The whole shop on one machine: database, API, counter screen and a nightly
+# backup.
 #
 # The frontend lives in its own repository, so clone the two side by side and
 # run this from here:
@@ -10,6 +11,32 @@
 # Settings come from .env in this folder (copy .env.example). The values that
 # only make sense inside Docker are set below and win over anything in .env,
 # so a file left pointing at a hosted database cannot quietly be used instead.
+
+# The API and the backup run the same image with the same settings; only the
+# command differs.
+x-api: &api
+  image: pharmacy-api
+  restart: unless-stopped
+  env_file:
+    - .env
+  environment: &api-env
+    NODE_ENV: production
+    PORT: 5002
+    DB_HOST: db
+    DB_PORT: 5432
+    # Postgres on the same private network, so no TLS to negotiate.
+    DB_SSL: "false"
+    BACKUP_DIR: /app/backups
+    # pg_dump and pg_restore are on PATH in this image. Blanked so a Windows
+    # path left in .env cannot send the backup looking for a C:\ drive.
+    PG_DUMP_PATH: ""
+    PG_RESTORE_PATH: ""
+    # The shop's own clock, so "2 a.m." and the dates in log lines and dump
+    # filenames all mean what the pharmacist would mean by them.
+    TZ: Asia/Dhaka
+  volumes:
+    # Dumps outlive the containers; without this a rebuild throws them away.
+    - ./backups:/app/backups
 
 services:
   db:
@@ -34,28 +61,11 @@ services:
       retries: 20
 
   backend:
+    <<: *api
     build:
       context: .
-    restart: unless-stopped
-    env_file:
-      - .env
-    environment:
-      NODE_ENV: production
-      PORT: 5002
-      DB_HOST: db
-      DB_PORT: 5432
-      # Postgres on the same private network, so no TLS to negotiate.
-      DB_SSL: "false"
-      BACKUP_DIR: /app/backups
-      # pg_dump and pg_restore are on PATH in this image. Blanked so a Windows
-      # path left in .env cannot send the backup looking for a C:\ drive.
-      PG_DUMP_PATH: ""
-      PG_RESTORE_PATH: ""
     ports:
       - "5002:5002"
-    volumes:
-      # Dumps outlive the container; without this a rebuild throws them away.
-      - ./backups:/app/backups
     depends_on:
       db:
         condition: service_healthy
@@ -63,6 +73,34 @@ services:
     # empty. All three are safe to repeat, so every restart brings a freshly
     # pulled version of the schema up to date before the API answers anything.
     command: sh -c "npm run deploy:prepare && node dist/main"
+    # The port only opens once migrations and seeds have finished, so this
+    # answering means the database is ready for anything else to touch it.
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "require('net').connect(5002,'127.0.0.1').on('connect',()=>process.exit(0)).on('error',()=>process.exit(1))"
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 5m
+
+  # One dump a night into ./backups, old ones pruned after BACKUP_KEEP_DAYS.
+  # Separate from the API so a restart of one is not a restart of the other,
+  # and so `docker compose logs backup` shows only this.
+  backup:
+    <<: *api
+    environment:
+      <<: *api-env
+      # Hour of the Dhaka day to take it, when the shop is shut.
+      BACKUP_HOUR: 2
+    depends_on:
+      # Not just started: on a fresh server the first dump would otherwise be
+      # taken while the catalogue was still being imported.
+      backend:
+        condition: service_healthy
+    command: sh docker/nightly-backup.sh
 
   frontend:
     build:
@@ -70,6 +108,7 @@ services:
     restart: unless-stopped
     environment:
       NODE_ENV: production
+      TZ: Asia/Dhaka
       # Service name, not localhost: the counter screen is rendered on the
       # server and talks to the API across Docker's own network.
       API_BASE_URL: http://backend:5002
@@ -79,7 +118,8 @@ services:
     ports:
       - "5001:5001"
     depends_on:
-      - backend
+      backend:
+        condition: service_healthy
 
 volumes:
   pgdata:

@@ -141,7 +141,7 @@ immediately rather than surfacing later on a query.
 ## Deploying with Docker
 
 `docker-compose.yml` here runs the whole shop on one machine: Postgres, this
-API on **5002**, and the counter screen on **5001**. The frontend is a separate
+API on **5002**, the counter screen on **5001**, and a nightly backup. The frontend is a separate
 repository, so clone the two side by side — the compose file builds it from
 `../pharmacy-fe`.
 
@@ -186,11 +186,38 @@ cannot be used by accident.
 | What | Where |
 | --- | --- |
 | The database | Docker volume `pgdata` — survives `docker compose down`, **not** `down -v` |
-| Backups | `./backups` on the host, written by `POST /admin/backup` |
+| Backups | `./backups` on the host — an ordinary folder you can copy off the machine |
 
-`pg_dump` and `pg_restore` are installed in the API image, so the backup button
-works. The client major there matches the `postgres:17-alpine` image; if you
-change one, change the other or old dumps will not restore.
+`pgdata` is the running database, not a backup. `./backups` holds `pg_dump`
+files that can be restored anywhere.
+
+`pg_dump` and `pg_restore` are installed in the API image. The client major
+there matches the `postgres:17-alpine` image; if you change one, change the
+other or old dumps will not restore.
+
+### Backups happen on their own
+
+The `backup` service takes one dump a night, at `BACKUP_HOUR` (default 2) on
+the shop's own clock, and deletes dumps older than `BACKUP_KEEP_DAYS`. Nobody
+has to press anything — the button in Settings still works, but nothing depends
+on someone remembering it. A server set up during the day takes its first dump
+as soon as it is ready rather than waiting for 2 a.m.
+
+```bash
+docker compose logs backup          # what it has taken
+ls backups/                         # the dumps themselves
+```
+
+To put one back — this **replaces** the current database:
+
+```bash
+docker compose exec backend \
+  node dist/database/seeds/backup.script.js --restore pharmacy-20260928-0200.dump
+```
+
+Both the database and the dumps are on the same machine, so a dead disk takes
+both. Copy `backups/` somewhere else — another drive, a pen drive, cloud
+storage — on whatever schedule the shop can keep to.
 
 Postgres is not published at all — the API reaches it over Docker's private
 network. To poke at it directly: `docker compose exec db psql -U $DB_USERNAME -d $DB_NAME`.
