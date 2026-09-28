@@ -343,16 +343,24 @@ export class SalesService {
 
     if (query.search !== undefined) {
       // Whoever is at the counter rarely has the invoice number — they have a
-      // strip of medicine, or a phone number. Any of the three finds the sale.
+      // strip of medicine, a phone number, or only what they paid. People
+      // remember the amount long after they have thrown the receipt away, so
+      // a bare number matches the total as well as everything else.
+      const amount = /^\d{1,7}(\.\d{1,2})?$/.test(query.search.trim())
+        ? Number(query.search.trim())
+        : null;
       qb.andWhere(
         `(sale.invoiceNumber ILIKE :search
           OR customer.name ILIKE :search
           OR customer.phone ILIKE :search
+          OR (CAST(:amount AS numeric) IS NOT NULL AND sale.totalAmount = CAST(:amount AS numeric))
           OR EXISTS (
             SELECT 1 FROM sale_items si
-            WHERE si.sale_id = sale.id AND si.brand_name_snapshot ILIKE :search
+            WHERE si.sale_id = sale.id
+              AND (si.brand_name_snapshot || ' ' || COALESCE(si.strength_snapshot, ''))
+                  ILIKE :search
           ))`,
-        { search: `%${query.search}%` },
+        { search: `%${query.search}%`, amount },
       );
     }
     if (query.status !== undefined && query.status !== 'all') {
