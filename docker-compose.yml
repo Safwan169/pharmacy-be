@@ -68,7 +68,9 @@ services:
   backend:
     <<: *api
     ports:
-      - "5002:5002"
+      # 0.0.0.0 until Caddy is in front; then BIND_ADDR=127.0.0.1 in .env
+      # closes this to the outside and leaves it for curl on the box.
+      - "${BIND_ADDR:-0.0.0.0}:5002:5002"
     depends_on:
       db:
         condition: service_healthy
@@ -142,11 +144,35 @@ services:
       # cookie is refused by the browser.
       SESSION_COOKIE_SECURE: ${SESSION_COOKIE_SECURE:-false}
     ports:
-      - "5001:5001"
+      - "${BIND_ADDR:-0.0.0.0}:5001:5001"
     depends_on:
       backend:
         condition: service_healthy
 
+  # HTTPS, and the certificates for it. Off until COMPOSE_PROFILES=https is
+  # in .env, because it cannot start before a domain points at this machine.
+  caddy:
+    image: caddy:2-alpine
+    profiles: ["https"]
+    restart: unless-stopped
+    environment:
+      SHOP_DOMAIN: ${SHOP_DOMAIN:-}
+      ACME_EMAIL: ${ACME_EMAIL:-}
+      TZ: Asia/Dhaka
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./docker/Caddyfile:/etc/caddy/Caddyfile:ro
+      # The certificates. Lose this and every restart asks Let's Encrypt for
+      # new ones, which is rate-limited to five a week per domain.
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - frontend
+
 volumes:
   pgdata:
+  caddy_data:
+  caddy_config:
   offsite_state:

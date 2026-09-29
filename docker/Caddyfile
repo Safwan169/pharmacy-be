@@ -1,0 +1,25 @@
+# HTTPS for the shop, with certificates Caddy fetches and renews on its own.
+#
+# The counter is worth serving over TLS for the obvious reason — passwords and
+# a day's takings cross the wire — and for one less obvious one: a browser
+# refuses a phone's camera on a plain http:// page, so scanning a box by camera
+# only works once this is in front.
+
+{
+	email {$ACME_EMAIL}
+}
+
+{$SHOP_DOMAIN} {
+	encode zstd gzip
+
+	# The counter screen renders on the server and talks to the API over
+	# Docker's private network, so the API needs no door to the outside. The
+	# one exception is its documentation, which can only be read in a browser.
+	handle /api/docs* {
+		reverse_proxy backend:5002
+	}
+
+	handle {
+		reverse_proxy frontend:5001
+	}
+}

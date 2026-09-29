@@ -313,11 +313,70 @@ Drive folder once a month to see that dumps are still arriving.
 Postgres is not published at all — the API reaches it over Docker's private
 network. To poke at it directly: `docker compose exec db psql -U $DB_USERNAME -d $DB_NAME`.
 
-### HTTPS
+### HTTPS and a domain
 
-Nothing here terminates TLS. Put Caddy or nginx in front if the shop reaches it
-over the internet — and note that **scanning with a phone camera only works
-over HTTPS**, so a plain `http://` address disables that button.
+The `caddy` service serves the shop over HTTPS and fetches and renews its own
+certificate from Let's Encrypt. It is worth turning on for the obvious reason —
+passwords and a day's takings cross the wire — and for one less obvious one: a
+browser refuses a phone's camera on a plain `http://` page, so **scanning a box
+by camera only works once this is in front**.
+
+It stays off until asked for, because it cannot start before a domain points at
+the machine.
+
+**1. Point the name at the server.** An `A` record per shop:
+
+```
+shop.example.com.    A    203.0.113.10
+```
+
+Behind Cloudflare, leave the cloud grey (DNS only) — an orange one terminates
+TLS itself and Caddy's certificate request never arrives. Wait until
+`dig +short shop.example.com` answers with the server's address.
+
+**2. Open the ports** the certificate request comes in on:
+
+```bash
+sudo ufw allow 80
+sudo ufw allow 443
+```
+
+**3. Say so in `.env`:**
+
+```ini
+COMPOSE_PROFILES=https
+SHOP_DOMAIN=shop.example.com
+ACME_EMAIL=you@example.com     # where Let's Encrypt warns of expiry
+SESSION_COOKIE_SECURE=true     # the session cookie becomes HTTPS-only
+BIND_ADDR=127.0.0.1            # 5001/5002 close to the outside
+```
+
+`SESSION_COOKIE_SECURE` and `BIND_ADDR` belong to the same step: after it, the
+site answers on `https://shop.example.com` and the old `http://<ip>:5001` stops
+working — signing in there would fail anyway, because the browser refuses to
+store an HTTPS-only cookie on a plain page.
+
+**4. Start it:**
+
+```bash
+docker compose up -d
+docker compose logs -f caddy      # "certificate obtained successfully"
+```
+
+The certificate arrives within a minute or two and renews itself from then on.
+It lives in the `caddy_data` volume; losing that means asking for a new one,
+and Let's Encrypt allows five per domain per week.
+
+Only port 443 is exposed to the world. The API keeps no door of its own — the
+counter screen renders on the server and reaches it over Docker's private
+network — apart from `/api/docs`, which can only be read in a browser.
+
+### A second shop on the same server
+
+Each shop is its own stack in its own folder, with its own database, and its own
+subdomain. Give the second one different host ports (`5011`/`5012`) and add its
+name to the same Caddyfile, or run a Caddy of its own on a shared Docker
+network — one Caddy can hold certificates for as many names as there are shops.
 
 ## Data model
 
