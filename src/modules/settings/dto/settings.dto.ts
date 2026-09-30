@@ -25,6 +25,14 @@ export class SettingsDto {
 
   @ApiProperty({ example: '12', description: 'Suggested profit % over cost when pricing at delivery. Empty = no suggestion.' })
   default_markup_percent!: string;
+
+  @ApiProperty({
+    example: '1000',
+    description:
+      'Cash the drawer already held before this app was used. Counts as the ' +
+      'balance the first day opens from; ignored once any night has been counted.',
+  })
+  opening_cash!: string;
 }
 
 export class UpdateSettingsDto {
@@ -72,4 +80,9 @@ export class UpdateSettingsDto {
   @Matches(/^(\d{1,3}(\.\d{1,2})?)?$/, { message: 'default_markup_percent must be a number or empty' })
   @IsOptional()
   default_markup_percent?: string;
+
+  @ApiPropertyOptional({ description: 'Taka with up to 2 decimals, or empty.' })
+  @Matches(/^(\d{1,8}(\.\d{1,2})?)?$/, { message: 'opening_cash must be an amount or empty' })
+  @IsOptional()
+  opening_cash?: string;
 }

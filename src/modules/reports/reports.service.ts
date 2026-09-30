@@ -10,6 +10,7 @@ import {
 } from '../dashboard/date-range';
 import { CloseDayDto } from './dto/close-day.dto';
 import { DayClosing } from './entities/day-closing.entity';
+import { SettingsService } from '../settings/settings.service';
 import {
   DailyClosingDto,
   DayClosingSummaryDto,
@@ -51,7 +52,10 @@ const CASH_FLOW_SQL = `
 
 @Injectable()
 export class ReportsService {
-  constructor(@InjectDataSource() private readonly dataSource: DataSource) {}
+  constructor(
+    @InjectDataSource() private readonly dataSource: DataSource,
+    private readonly settingsService: SettingsService,
+  ) {}
 
   async dailyClosing(date: string | undefined, onlyCashierId?: number): Promise<DailyClosingDto> {
     const day = date ?? civilDateIn(new Date(), PHARMACY_TIME_ZONE);
@@ -195,6 +199,12 @@ export class ReportsService {
    * "Since" is the moment of the count, not the midnight after it. A supplier
    * paid out of the drawer at ten past eleven, after counting at eleven, would
    * otherwise leave the shop without ever leaving the books.
+   *
+   * Before the first count there is nothing to carry, so it falls back to the
+   * whole history on top of whatever the shop says the drawer held before the
+   * app existed. Without that figure the drawer starts empty, and a shop that
+   * began with a thousand taka in the till sees its own money read as a
+   * shortfall — or worse, as a negative balance the moment a supplier is paid.
    */
   private async openingCash(start: Date): Promise<number> {
     const [last] = (await this.dataSource.query(
@@ -211,7 +221,11 @@ export class ReportsService {
       since,
       start,
     ])) as Record<string, string>[];
-    return round2(n(last?.counted_cash) + n(flow.moved));
+    const before =
+      last === undefined
+        ? n((await this.settingsService.getAll()).opening_cash)
+        : n(last.counted_cash);
+    return round2(before + n(flow.moved));
   }
 
   /**
