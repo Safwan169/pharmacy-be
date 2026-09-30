@@ -48,6 +48,9 @@ import { SuppliersService } from './suppliers.service';
 export class SuppliersController {
   constructor(private readonly suppliersService: SuppliersService) {}
 
+  // A cashier taking a delivery has to say who brought it. Everything else
+  // about a supplier — what is owed, paying them — stays with the owner.
+  @Roles('owner', 'cashier')
   @Get()
   @ApiOperation({ summary: 'List or search suppliers' })
   @ApiPaginatedResponse(Supplier, 'Suppliers ordered by name.')

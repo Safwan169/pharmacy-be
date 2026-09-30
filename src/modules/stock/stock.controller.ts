@@ -56,13 +56,15 @@ export class StockController {
   ) {}
 
   @Post('receipts')
-  @Roles('owner')
+  @Roles('owner', 'cashier')
   @ApiOperation({
     summary: 'Receive a delivery',
     description:
       'Every line creates a batch with its batch number, expiry date and ' +
       'cost per base unit, adds to stock and writes a stock_in movement. ' +
-      'All or nothing: one bad line rejects the whole receipt.',
+      'All or nothing: one bad line rejects the whole receipt. A cashier may ' +
+      'record the delivery and price it, but not hand over money: their ' +
+      'receipts always go on account whatever they send.',
   })
   @ApiCreatedResponse({ type: StockReceipt })
   @ApiUnprocessableEntityResponse({
@@ -73,11 +75,19 @@ export class StockController {
     @Body() dto: CreateReceiptDto,
     @CurrentUser() user: AuthenticatedUser,
   ): Promise<StockReceipt> {
-    return this.receiptsService.create(dto, user.id);
+    // Stock arrives when it arrives, often with no owner in the shop, so a
+    // cashier can take the delivery in. Paying for it is a different act —
+    // it moves the shop's money — and is refused here rather than merely
+    // hidden in the screen, so a crafted request cannot get round it.
+    const payment =
+      user.role === 'owner'
+        ? {}
+        : { paid_amount: 0, paid_method: undefined, paid_from_drawer: undefined };
+    return this.receiptsService.create({ ...dto, ...payment }, user.id);
   }
 
   @Get('receipts')
-  @Roles('owner')
+  @Roles('owner', 'cashier')
   @ApiOperation({ summary: 'List past deliveries' })
   @ApiPaginatedResponse(StockReceipt, 'Receipts, newest first.')
   listReceipts(
@@ -87,7 +97,7 @@ export class StockController {
   }
 
   @Get('receipts/:id')
-  @Roles('owner')
+  @Roles('owner', 'cashier')
   @ApiOperation({ summary: 'One delivery with its lines' })
   @ApiOkResponse({ type: StockReceipt })
   @ApiNotFoundResponse({ description: 'No receipt with that id.' })
