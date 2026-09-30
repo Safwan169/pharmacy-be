@@ -9,6 +9,7 @@ import { DataSource, EntityManager, In, Repository } from 'typeorm';
 import { PaginatedDto, paginate } from '../../common/dto/paginated.dto';
 import { adjustCustomerBalance } from '../customers/customer-balance';
 import { applyDuePayment } from '../customers/apply-due-payment';
+import { PHARMACY_TIME_ZONE } from '../dashboard/date-range';
 import { Customer } from '../customers/entities/customer.entity';
 import { ProductVariant } from '../product-variants/entities/product-variant.entity';
 import { VariantUnit } from '../product-variants/entities/variant-unit.entity';
@@ -498,11 +499,15 @@ export class SalesService {
     // An INSERT ... RETURNING resolves to the rows array (an UPDATE would
     // instead resolve to a [rows, rowCount] tuple).
     const rows: InvoiceSequenceRow[] = await manager.query(
+      // The shop's own day, not the server's: CURRENT_DATE is UTC here, so a
+      // sale rung up at one in the morning took yesterday's invoice date while
+      // the day's report counted it today.
       `INSERT INTO invoice_sequences ("day", "last_value")
-       VALUES (CURRENT_DATE, 1)
+       VALUES ((now() AT TIME ZONE $1)::date, 1)
        ON CONFLICT ("day") DO UPDATE
          SET "last_value" = invoice_sequences."last_value" + 1
        RETURNING to_char("day", 'YYYYMMDD') AS day_key, "last_value"`,
+      [PHARMACY_TIME_ZONE],
     );
 
     const row = rows[0];
