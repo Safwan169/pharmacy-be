@@ -1,6 +1,7 @@
-import { Controller, Get, Query, Res, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Post, Query, Res, UseGuards } from '@nestjs/common';
 import {
   ApiBearerAuth,
+  ApiCreatedResponse,
   ApiForbiddenResponse,
   ApiOkResponse,
   ApiOperation,
@@ -15,10 +16,12 @@ import type { AuthenticatedUser } from '../../common/types/authenticated-user';
 import {
   DailyClosingDto,
   DailyClosingQueryDto,
+  DayClosingSummaryDto,
   ProfitQueryDto,
   ProfitReportDto,
   StockValueDto,
 } from './dto/reports.dto';
+import { CloseDayDto } from './dto/close-day.dto';
 import { ReportsService, toCsv } from './reports.service';
 
 @ApiTags('reports')
@@ -27,6 +30,25 @@ import { ReportsService, toCsv } from './reports.service';
 @Controller('reports')
 export class ReportsController {
   constructor(private readonly reportsService: ReportsService) {}
+
+  @Post('daily-closing/close')
+  @Roles('owner')
+  @ApiOperation({
+    summary: 'Record what the drawer actually held',
+    description:
+      'The expected figure adds up every taking and payout since the shop ' +
+      'opened, so cash taken out for lunch leaves a gap that grows for ever. ' +
+      'Counting the drawer ends the day: the next one opens from this number ' +
+      'instead. Closing a day again replaces the count.',
+  })
+  @ApiCreatedResponse({ type: DayClosingSummaryDto })
+  @ApiForbiddenResponse({ description: 'Owner only, or the day has not happened yet.' })
+  closeDay(
+    @Body() dto: CloseDayDto,
+    @CurrentUser() user: AuthenticatedUser,
+  ): Promise<DayClosingSummaryDto> {
+    return this.reportsService.closeDay(dto, user.id);
+  }
 
   @Get('daily-closing')
   @ApiOperation({

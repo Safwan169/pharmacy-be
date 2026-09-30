@@ -53,6 +53,22 @@ export class ClosingCashierDto {
   @ApiProperty() amount!: number;
 }
 
+export class DayClosingSummaryDto {
+  @ApiProperty({ example: '2026-09-30' }) date!: string;
+  @ApiProperty({ description: 'What the day’s figures said the drawer should hold.' })
+  expected_cash!: number;
+  @ApiProperty({ description: 'What counting it found.' }) counted_cash!: number;
+  @ApiProperty({
+    description:
+      'Counted less expected. Negative is cash that left the drawer without ' +
+      'being recorded — lunch, a rickshaw, a hand in the till.',
+  })
+  difference!: number;
+  @ApiProperty({ nullable: true }) note!: string | null;
+  @ApiProperty() closed_at!: Date;
+  @ApiProperty({ description: 'Who counted it.' }) closed_by!: string;
+}
+
 export class DailyClosingDto {
   @ApiProperty({ example: '2026-09-17' }) date!: string;
   @ApiProperty() sales_count!: number;
@@ -78,6 +94,14 @@ export class DailyClosingDto {
       'view, where a shop-wide balance would mean nothing.',
   })
   opening_cash!: number | null;
+  @ApiProperty({
+    type: () => DayClosingSummaryDto,
+    nullable: true,
+    description:
+      'The night this day was counted, once it has been. Null for a ' +
+      'cashier-scoped view.',
+  })
+  closing!: DayClosingSummaryDto | null;
   @ApiProperty({ description: 'opening_cash + cash sales + cash due collections - cash refunds - cash paid to suppliers out of the drawer.' }) cash_in_drawer_expected!: number;
   @ApiProperty() voided_count!: number;
   @ApiProperty({ type: ClosingTopItemDto, isArray: true }) top_items!: ClosingTopItemDto[];

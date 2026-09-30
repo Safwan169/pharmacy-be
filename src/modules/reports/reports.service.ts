@@ -1,13 +1,18 @@
-import { BadRequestException, Injectable } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Injectable } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import {
   PHARMACY_TIME_ZONE,
+  addCivilDays,
   civilDateIn,
+  startOfCivilDay,
   toInstantWindow,
 } from '../dashboard/date-range';
+import { CloseDayDto } from './dto/close-day.dto';
+import { DayClosing } from './entities/day-closing.entity';
 import {
   DailyClosingDto,
+  DayClosingSummaryDto,
   ProfitDayDto,
   ProfitReportDto,
   StockValueDto,
@@ -23,21 +28,25 @@ const n = (v: unknown): number => Number(v ?? 0);
  * count a total once per line.
  */
 /**
- * Everything the drawer took in and paid out before a given instant. The shop
- * opened with nothing, so the running total is the opening balance — no count
- * and no typing, which is the point.
+ * Cash into the drawer less cash out of it, between two instants. A null lower
+ * bound means "since the shop opened", which is the only honest answer before
+ * anyone has ever counted the drawer.
  */
-const OPENING_CASH_SQL = `
+const CASH_FLOW_SQL = `
   SELECT
     (SELECT COALESCE(SUM(total_amount), 0) FROM sales
-      WHERE status <> 'voided' AND payment_method = 'cash' AND created_at < $1)
+      WHERE status <> 'voided' AND payment_method = 'cash'
+        AND ($1::timestamptz IS NULL OR created_at >= $1) AND created_at < $2)
   + (SELECT COALESCE(SUM(amount), 0) FROM due_payments
-      WHERE method = 'cash' AND created_at < $1)
+      WHERE method = 'cash'
+        AND ($1::timestamptz IS NULL OR created_at >= $1) AND created_at < $2)
   - (SELECT COALESCE(SUM(refund_amount), 0) FROM sale_returns
-      WHERE refund_method = 'cash' AND created_at < $1)
+      WHERE refund_method = 'cash'
+        AND ($1::timestamptz IS NULL OR created_at >= $1) AND created_at < $2)
   - (SELECT COALESCE(SUM(amount), 0) FROM supplier_payments
-      WHERE method = 'cash' AND from_drawer = true AND created_at < $1)
-  AS opening_cash
+      WHERE method = 'cash' AND from_drawer = true
+        AND ($1::timestamptz IS NULL OR created_at >= $1) AND created_at < $2)
+  AS moved
 `;
 
 @Injectable()
@@ -96,21 +105,12 @@ export class ReportsService {
       params,
     )) as Record<string, string>[];
 
-    // What the drawer had before the day opened: every taking and every payout
-    // since the shop began. Nobody counts or types it, so it can never be
-    // forgotten — and it is what stops a day of heavy supplier payments from
-    // reporting a negative drawer. A single cashier's view has no such balance.
+    // What the drawer held when the day opened. A single cashier's view has no
+    // such balance — the drawer is the shop's, not theirs.
     const openingCash =
-      onlyCashierId === undefined
-        ? n(
-            (
-              (await this.dataSource.query(OPENING_CASH_SQL, [start])) as Record<
-                string,
-                string
-              >[]
-            )[0].opening_cash,
-          )
-        : null;
+      onlyCashierId === undefined ? await this.openingCash(start) : null;
+    const closing =
+      onlyCashierId === undefined ? await this.closingSummary(day) : null;
 
     const topItems = (await this.dataSource.query(
       `SELECT si.product_variant_id AS variant_id,
@@ -158,6 +158,7 @@ export class ReportsService {
         cash_outside: n(supplierPaid.cash_outside),
       },
       opening_cash: openingCash,
+      closing,
       cash_in_drawer_expected: round2(
         (openingCash ?? 0) +
           n(totals.cash) +
@@ -180,6 +181,90 @@ export class ReportsService {
         amount: n(r.amount),
       })),
     };
+  }
+
+  /**
+   * The drawer's balance at the start of a day.
+   *
+   * Counting it shut the books on everything before it, so the balance is last
+   * night's count plus whatever has moved since. Without a count anywhere in
+   * the past it falls back to adding up the shop's whole history, which is
+   * what every day did before closings existed — so turning this on changes no
+   * figure until the first night is closed.
+   */
+  private async openingCash(start: Date): Promise<number> {
+    const [last] = (await this.dataSource.query(
+      `SELECT to_char(business_date, 'YYYY-MM-DD') AS day, counted_cash
+         FROM day_closings
+        WHERE business_date < $1::date
+        ORDER BY business_date DESC
+        LIMIT 1`,
+      [civilDateIn(start, PHARMACY_TIME_ZONE)],
+    )) as { day: string; counted_cash: string }[];
+
+    const since =
+      last === undefined
+        ? null
+        : startOfCivilDay(addCivilDays(last.day, 1), PHARMACY_TIME_ZONE);
+    const [flow] = (await this.dataSource.query(CASH_FLOW_SQL, [
+      since,
+      start,
+    ])) as Record<string, string>[];
+    return round2(n(last?.counted_cash) + n(flow.moved));
+  }
+
+  /**
+   * The night's count, as the API reports it. The stored row carries the whole
+   * user it was closed by, password hash and all, so it never leaves here.
+   */
+  private async closingSummary(day: string): Promise<DayClosingSummaryDto | null> {
+    const row = await this.dataSource.getRepository(DayClosing).findOne({
+      where: { businessDate: day },
+      relations: { closedBy: true },
+    });
+    if (row === null) return null;
+    return {
+      date: row.businessDate,
+      expected_cash: row.expectedCash,
+      counted_cash: row.countedCash,
+      difference: row.difference,
+      note: row.note,
+      closed_at: row.createdAt,
+      closed_by: row.closedBy?.name || row.closedBy?.email || '-',
+    };
+  }
+
+  /**
+   * Records what the drawer actually held, which is what makes tomorrow's
+   * opening balance true. Closing a day again replaces the count rather than
+   * adding a second one — a miscounted night has to be correctable.
+   */
+  async closeDay(dto: CloseDayDto, userId: number): Promise<DayClosingSummaryDto> {
+    const today = civilDateIn(new Date(), PHARMACY_TIME_ZONE);
+    const day = dto.date ?? today;
+    if (day > today) {
+      throw new ForbiddenException('A day cannot be closed before it has happened.');
+    }
+
+    // The expectation is stored as it stood tonight. A sale voided next week
+    // would otherwise quietly rewrite what the drawer was once short by.
+    const report = await this.dailyClosing(day);
+    const expected = report.cash_in_drawer_expected;
+    const repository = this.dataSource.getRepository(DayClosing);
+    const existing = await repository.findOne({ where: { businessDate: day } });
+
+    await repository.save(
+      repository.create({
+        ...(existing === null ? {} : { id: existing.id }),
+        businessDate: day,
+        expectedCash: expected,
+        countedCash: dto.counted_cash,
+        difference: round2(dto.counted_cash - expected),
+        note: dto.note?.trim() || null,
+        closedById: userId,
+      }),
+    );
+    return (await this.closingSummary(day))!;
   }
 
   async profit(from: string, to: string): Promise<ProfitReportDto> {
