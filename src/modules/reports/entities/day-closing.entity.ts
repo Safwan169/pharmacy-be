@@ -44,6 +44,14 @@ export class DayClosing {
   @JoinColumn({ name: 'closed_by' })
   closedBy?: User;
 
+  @ApiProperty({
+    description:
+      'When the drawer was counted. Counting the night again moves this, ' +
+      'because it is the line the next day’s opening balance is drawn from.',
+  })
+  @Column({ name: 'counted_at', type: 'timestamptz' })
+  countedAt!: Date;
+
   @ApiProperty()
   @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
   createdAt!: Date;

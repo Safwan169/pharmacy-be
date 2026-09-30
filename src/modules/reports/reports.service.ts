@@ -191,21 +191,22 @@ export class ReportsService {
    * the past it falls back to adding up the shop's whole history, which is
    * what every day did before closings existed — so turning this on changes no
    * figure until the first night is closed.
+   *
+   * "Since" is the moment of the count, not the midnight after it. A supplier
+   * paid out of the drawer at ten past eleven, after counting at eleven, would
+   * otherwise leave the shop without ever leaving the books.
    */
   private async openingCash(start: Date): Promise<number> {
     const [last] = (await this.dataSource.query(
-      `SELECT to_char(business_date, 'YYYY-MM-DD') AS day, counted_cash
+      `SELECT counted_at, counted_cash
          FROM day_closings
         WHERE business_date < $1::date
         ORDER BY business_date DESC
         LIMIT 1`,
       [civilDateIn(start, PHARMACY_TIME_ZONE)],
-    )) as { day: string; counted_cash: string }[];
+    )) as { counted_at: Date; counted_cash: string }[];
 
-    const since =
-      last === undefined
-        ? null
-        : startOfCivilDay(addCivilDays(last.day, 1), PHARMACY_TIME_ZONE);
+    const since = last === undefined ? null : last.counted_at;
     const [flow] = (await this.dataSource.query(CASH_FLOW_SQL, [
       since,
       start,
@@ -229,7 +230,7 @@ export class ReportsService {
       counted_cash: row.countedCash,
       difference: row.difference,
       note: row.note,
-      closed_at: row.createdAt,
+      closed_at: row.countedAt,
       closed_by: row.closedBy?.name || row.closedBy?.email || '-',
     };
   }
@@ -261,6 +262,8 @@ export class ReportsService {
         countedCash: dto.counted_cash,
         difference: round2(dto.counted_cash - expected),
         note: dto.note?.trim() || null,
+        // Moves when a night is counted again; created_at does not.
+        countedAt: new Date(),
         closedById: userId,
       }),
     );
