@@ -1,0 +1,5 @@
+# Shell scripts run inside Linux containers, where a carriage return is part
+# of the command: `set -u` checked out as `set -u\r` makes /bin/sh reject the
+# option and the container restart for ever. Windows checkouts must not add
+# them, whatever core.autocrlf says.
+*.sh text eol=lf

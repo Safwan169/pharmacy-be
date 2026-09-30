@@ -22,5 +22,10 @@ COPY --from=build /app/dist ./dist
 # the one data file the image needs comes across even though src/ does not.
 COPY src/docs/medicine.csv ./src/docs/medicine.csv
 COPY docker/nightly-backup.sh ./docker/nightly-backup.sh
+# Belt as well as braces: .gitattributes keeps carriage returns out of the
+# checkout, and this keeps them out of the image even when someone builds from
+# a working copy that predates it. /bin/sh reads a stray  as part of the
+# command, which is a restart loop rather than an error anybody would spot.
+RUN sed -i 's/$//' docker/nightly-backup.sh
 EXPOSE 5002
 CMD ["node", "dist/main"]
