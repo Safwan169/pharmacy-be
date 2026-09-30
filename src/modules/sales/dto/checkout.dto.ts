@@ -127,6 +127,28 @@ export class CheckoutDto {
   @IsOptional()
   amount_tendered?: number;
 
+  @ApiPropertyOptional({
+    example: 300,
+    description:
+      'Due only: what the customer is handing over now, against a bill that ' +
+      'otherwise goes on their account. The rest stays owed. Omit for nothing now.',
+  })
+  @Type(() => Number)
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0.01)
+  @Max(99_999_999.99)
+  @IsOptional()
+  paid_now?: number;
+
+  @ApiPropertyOptional({
+    enum: ['cash', 'bkash'],
+    example: 'cash',
+    description: 'How `paid_now` came in. Defaults to cash.',
+  })
+  @IsIn(['cash', 'bkash'])
+  @IsOptional()
+  paid_now_method?: 'cash' | 'bkash';
+
   @ApiPropertyOptional({ example: 'BKD7X1A2', maxLength: 30, description: 'bKash only.' })
   @IsString()
   @MaxLength(30)

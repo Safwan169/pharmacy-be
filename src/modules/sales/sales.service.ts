@@ -8,6 +8,7 @@ import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import { DataSource, EntityManager, In, Repository } from 'typeorm';
 import { PaginatedDto, paginate } from '../../common/dto/paginated.dto';
 import { adjustCustomerBalance } from '../customers/customer-balance';
+import { applyDuePayment } from '../customers/apply-due-payment';
 import { Customer } from '../customers/entities/customer.entity';
 import { ProductVariant } from '../product-variants/entities/product-variant.entity';
 import { VariantUnit } from '../product-variants/entities/variant-unit.entity';
@@ -62,6 +63,13 @@ export class SalesService {
     const duplicates = findDuplicateVariants(dto.items);
     if (duplicates.length > 0) {
       throw rejectCheckout(duplicates);
+    }
+    if (dto.paid_now !== undefined && dto.payment_method !== 'due') {
+      throw new BadRequestException({
+        message:
+          'Part payment belongs to a bill that goes on account. Send payment_method "due".',
+        reason: 'paid_now_not_due',
+      });
     }
     if (dto.payment_method === 'due' && dto.customer_id === undefined && dto.customer === undefined) {
       throw new BadRequestException({
@@ -261,6 +269,35 @@ export class SalesService {
       );
       if (customerId !== null && dueMinor > 0) {
         await adjustCustomerBalance(manager, customerId, dueMinor);
+      }
+
+      // Part of the bill settled at the counter. The debt goes on in full
+      // first and comes straight back off, which is the same pair of events
+      // as paying it off tomorrow: the drawer, the day's takings and the
+      // customer's ledger all already know how to read them.
+      if (customerId !== null && dto.paid_now !== undefined) {
+        const nowMinor = toMinorUnits(dto.paid_now);
+        if (nowMinor > totalMinor) {
+          throw new BadRequestException({
+            message: 'That is more than this bill. Enter the bill amount or less.',
+            reason: 'paid_now_over_total',
+          });
+        }
+        if (nowMinor === totalMinor) {
+          throw new BadRequestException({
+            message:
+              'That settles the whole bill — take it as cash or bKash rather than on account.',
+            reason: 'paid_now_is_total',
+          });
+        }
+        await applyDuePayment(manager, {
+          customerId,
+          amount: dto.paid_now,
+          method: dto.paid_now_method ?? 'cash',
+          bkashTrxId: dto.paid_now_method === 'bkash' ? dto.bkash_trx_id : null,
+          saleId: sale.id,
+          userId,
+        });
       }
 
       // Deduct in a stable id order so two concurrent checkouts touching the
