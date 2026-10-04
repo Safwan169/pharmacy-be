@@ -17,6 +17,7 @@ import { SalesModule } from './modules/sales/sales.module';
 import { AuditModule } from './modules/audit/audit.module';
 import { SettingsModule } from './modules/settings/settings.module';
 import { StockModule } from './modules/stock/stock.module';
+import { StockIntakeModule } from './modules/stock-intake/stock-intake.module';
 import { SuppliersModule } from './modules/suppliers/suppliers.module';
 import { UsersModule } from './modules/users/users.module';
 
@@ -42,6 +43,7 @@ import { UsersModule } from './modules/users/users.module';
     ImportModule,
     SuppliersModule,
     StockModule,
+    StockIntakeModule,
     SalesModule,
     CustomersModule,
     DashboardModule,

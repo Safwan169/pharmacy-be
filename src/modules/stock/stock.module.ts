@@ -28,6 +28,6 @@ import { StockService } from './stock.service';
   ],
   controllers: [StockController],
   providers: [StockService, ExpiryService, ReceiptsService],
-  exports: [StockService],
+  exports: [StockService, ReceiptsService],
 })
 export class StockModule {}

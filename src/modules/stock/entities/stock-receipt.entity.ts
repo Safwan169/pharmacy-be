@@ -82,6 +82,16 @@ export class StockReceipt {
   @Column({ type: 'varchar', length: 255, nullable: true })
   note!: string | null;
 
+  @ApiPropertyOptional({
+    example: 'popular-2026-10-04',
+    nullable: true,
+    description:
+      'The name a bulk intake was sent under. Unique, so the same sheet ' +
+      'cannot be taken in twice. Null for a delivery entered by hand.',
+  })
+  @Column({ name: 'intake_reference', type: 'varchar', length: 100, nullable: true })
+  intakeReference!: string | null;
+
   @Column({ name: 'created_by', type: 'integer' })
   createdById!: number;
 
