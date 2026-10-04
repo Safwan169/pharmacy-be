@@ -68,12 +68,20 @@ export class ReceiptLineDto {
   @Max(1_000_000)
   quantity!: number;
 
-  @ApiProperty({ example: 950, description: 'Cost per unit bought, before VAT.' })
+  @ApiPropertyOptional({
+    example: 950,
+    description:
+      'Cost per unit bought, before VAT. Omit when it is genuinely not known — ' +
+      'stock already on the shelf when the shop started here. The batch is then ' +
+      'stored without a cost, and the profit and stock-value reports say how ' +
+      'much they could not cost instead of counting it as free.',
+  })
   @Type(() => Number)
   @IsNumber({ maxDecimalPlaces: 2 })
   @Min(0)
   @Max(99_999_999.99)
-  unit_cost!: number;
+  @IsOptional()
+  unit_cost?: number;
 
   @ApiPropertyOptional({ example: 'B2409A', maxLength: 50 })
   @IsString()

@@ -159,23 +159,32 @@ export class StockReceiptItem {
   @Column({ name: 'base_quantity', type: 'integer' })
   baseQuantity!: number;
 
-  @ApiProperty({ example: 950, description: 'Cost per purchase unit.' })
+  @ApiProperty({
+    example: 950,
+    nullable: true,
+    description:
+      'Cost per purchase unit. Null when the delivery arrived without one — ' +
+      'stock that was already on the shelf, say. Reports count what they ' +
+      'cannot cost rather than treating it as free.',
+  })
   @Column({
     name: 'unit_cost',
     type: 'numeric',
     precision: 10,
     scale: 2,
+    nullable: true,
     transformer: numericTransformer,
   })
-  unitCost!: number;
+  unitCost!: number | null;
 
-  @ApiProperty({ example: 4750 })
+  @ApiProperty({ example: 4750, nullable: true })
   @Column({
     name: 'line_cost',
     type: 'numeric',
     precision: 12,
     scale: 2,
+    nullable: true,
     transformer: numericTransformer,
   })
-  lineCost!: number;
+  lineCost!: number | null;
 }

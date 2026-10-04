@@ -137,12 +137,16 @@ export class ReceiptsService {
       for (const entry of resolved) {
         const { line, variant, unitName, qtyInBase } = entry!;
         const baseQuantity = line.quantity * qtyInBase;
-        const lineCostMinor = toMinorUnits(line.unit_cost) * line.quantity;
+        // A line with no cost is not a line that cost nothing. It stays null
+        // all the way down, and the delivery's total is the cost of the lines
+        // that had one.
+        const costed = line.unit_cost !== undefined;
+        const lineCostMinor = costed ? toMinorUnits(line.unit_cost!) * line.quantity : 0;
         totalMinor += lineCostMinor;
         // Cost per base unit, to the poisha — what profit reports multiply by.
-        const costPerBase = fromMinorUnits(
-          Math.round(toMinorUnits(line.unit_cost) / qtyInBase),
-        );
+        const costPerBase = costed
+          ? fromMinorUnits(Math.round(toMinorUnits(line.unit_cost!) / qtyInBase))
+          : null;
 
         const batch = await this.stockService.createBatch(manager, {
           variantId: variant.id,
@@ -168,8 +172,8 @@ export class ReceiptsService {
             qtyInBase,
             quantity: line.quantity,
             baseQuantity,
-            unitCost: line.unit_cost,
-            lineCost: fromMinorUnits(lineCostMinor),
+            unitCost: costed ? line.unit_cost! : null,
+            lineCost: costed ? fromMinorUnits(lineCostMinor) : null,
           }),
         );
 
