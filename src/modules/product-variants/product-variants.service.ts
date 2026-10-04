@@ -99,12 +99,25 @@ export class ProductVariantsService {
           END`,
         'search_rank',
       )
+        // One brand can be twenty rows — every strength, every form, most of
+        // them never stocked here. The cashier wants the one on the shelf, so
+        // what this shop prices and holds comes first, then what it prices,
+        // then the rest of the catalogue.
+        .addSelect(
+          `CASE
+              WHEN variant.price IS NOT NULL AND COALESCE(variant.stockQuantity, 0) > 0 THEN 0
+              WHEN variant.price IS NOT NULL THEN 1
+              ELSE 2
+            END`,
+          'stocked_rank',
+        )
         .setParameters({
           exact: words[0] ?? term,
           prefix: `${words[0] ?? term}%`,
           search: `%${words[0] ?? term}%`,
         })
         .orderBy('search_rank', 'ASC')
+        .addOrderBy('stocked_rank', 'ASC')
         .addOrderBy('product.brandName', 'ASC');
     } else {
       qb.orderBy('product.brandName', 'ASC');
