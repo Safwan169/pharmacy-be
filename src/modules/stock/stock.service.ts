@@ -6,6 +6,7 @@ import {
 } from '@nestjs/common';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import { DataSource, EntityManager, Repository } from 'typeorm';
+import { AuditService } from '../audit/audit.service';
 import { PendingPriceService } from '../pricing/pending-price.service';
 import { ProductVariant } from '../product-variants/entities/product-variant.entity';
 import { StockBatch } from './entities/stock-batch.entity';
@@ -46,7 +47,66 @@ export class StockService {
     @InjectRepository(StockBatch)
     private readonly batchesRepository: Repository<StockBatch>,
     private readonly pendingPrices: PendingPriceService,
+    private readonly auditService: AuditService,
   ) {}
+
+  /**
+   * Gives a cost to stock that came in before costs were recorded: the
+   * selling price per base unit less `percentBelowPrice`. Only batches still
+   * on the shelf with no cost are touched, so stock received with a real cost
+   * is never overwritten and running it twice changes nothing. Sold-out
+   * batches are left uncosted on purpose — past profit stays unknown rather
+   * than guessed.
+   */
+  async costOpeningStock(
+    percentBelowPrice: number,
+    userId: number,
+  ): Promise<{ batches_costed: number; value_at_cost: number; batches_skipped: number }> {
+    return this.dataSource.transaction(async (manager) => {
+      // Per base unit from the unit shown at the counter, else the smallest
+      // priced one — the same rate a sale of one base unit would charge.
+      const updated = (await manager.query(
+        `UPDATE stock_batches b
+            SET cost_price = ROUND(p.per_base * (100 - $1::numeric) / 100, 2),
+                updated_at = now()
+           FROM (
+             SELECT DISTINCT ON (variant_id) variant_id, price / qty_in_base AS per_base
+               FROM variant_units
+              WHERE price IS NOT NULL AND price > 0 AND is_sellable
+              ORDER BY variant_id, is_default DESC, qty_in_base ASC
+           ) p
+          WHERE p.variant_id = b.variant_id
+            AND b.quantity > 0
+            AND b.cost_price IS NULL
+      RETURNING b.quantity, b.cost_price`,
+        [percentBelowPrice],
+      )) as [{ quantity: number; cost_price: string }[], number];
+      const rows = updated[0];
+      const value = rows.reduce((sum, r) => sum + Number(r.quantity) * Number(r.cost_price), 0);
+      const [left] = (await manager.query(
+        `SELECT COUNT(*)::int AS n FROM stock_batches WHERE quantity > 0 AND cost_price IS NULL`,
+      )) as { n: number }[];
+
+      const result = {
+        batches_costed: rows.length,
+        value_at_cost: Math.round(value * 100) / 100,
+        batches_skipped: left.n,
+      };
+      if (rows.length > 0) {
+        await this.auditService.record(
+          {
+            userId,
+            action: 'stock.opening_cost',
+            entityType: 'stock',
+            summary: `Opening stock costed at selling price less ${percentBelowPrice}%: ${rows.length} batches, ৳${result.value_at_cost}`,
+            details: { percent_below_price: percentBelowPrice, ...result },
+          },
+          manager,
+        );
+      }
+      return result;
+    });
+  }
 
   /**
    * Picks batches for a sale, soonest expiry first, skipping expired ones.

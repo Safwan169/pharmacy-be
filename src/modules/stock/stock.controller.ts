@@ -37,6 +37,7 @@ import {
   ListMovementsQueryDto,
   ListReceiptsQueryDto,
 } from './dto/receipt.dto';
+import { OpeningCostDto, OpeningCostResultDto } from './dto/opening-cost.dto';
 import { StockBatch } from './entities/stock-batch.entity';
 import { StockMovement } from './entities/stock-movement.entity';
 import { StockReceipt } from './entities/stock-receipt.entity';
@@ -159,5 +160,24 @@ export class StockController {
     @CurrentUser() user: AuthenticatedUser,
   ): Promise<StockBatch> {
     return this.stockService.writeOff(id, user.id, dto.note);
+  }
+
+  @Post('opening-cost')
+  @Roles('owner')
+  @ApiOperation({
+    summary: 'Cost the stock that came in without one',
+    description:
+      'One-off for stock entered before costs were recorded: every batch ' +
+      'still in stock with no cost gets the selling price per base unit less ' +
+      'the given percent. Batches that already have a cost, and sold-out ' +
+      'ones, are left alone, so a second run changes nothing.',
+  })
+  @ApiCreatedResponse({ type: OpeningCostResultDto })
+  @ApiUnauthorizedResponse({ description: 'Missing or invalid token.' })
+  costOpeningStock(
+    @Body() dto: OpeningCostDto,
+    @CurrentUser() user: AuthenticatedUser,
+  ): Promise<OpeningCostResultDto> {
+    return this.stockService.costOpeningStock(dto.percent_below_price, user.id);
   }
 }
