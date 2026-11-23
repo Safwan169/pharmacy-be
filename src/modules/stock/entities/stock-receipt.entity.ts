@@ -20,6 +20,15 @@ import { StockBatch } from './stock-batch.entity';
 /** A goods-received note: one delivery from a supplier, any number of lines. */
 @Entity({ name: 'stock_receipts' })
 @Unique('uq_stock_receipts_number', ['receiptNumber'])
+@Index('idx_stock_receipts_source_name', ['sourceName'])
+@Check(
+  'chk_stock_receipts_source_type',
+  `"source_type" IN ('supplier', 'borrow', 'uncounted_old')`,
+)
+@Check(
+  'chk_stock_receipts_source_name',
+  `("source_type" = 'borrow' AND "source_name" IS NOT NULL AND length(trim("source_name")) > 0) OR ("source_type" <> 'borrow' AND "source_name" IS NULL)`,
+)
 export class StockReceipt {
   @ApiProperty({ example: 1 })
   @PrimaryGeneratedColumn()
@@ -81,6 +90,17 @@ export class StockReceipt {
   @ApiPropertyOptional({ nullable: true })
   @Column({ type: 'varchar', length: 255, nullable: true })
   note!: string | null;
+
+  @ApiProperty({
+    enum: ['supplier', 'borrow', 'uncounted_old'],
+    default: 'supplier',
+  })
+  @Column({ name: 'source_type', type: 'varchar', length: 20, default: 'supplier' })
+  sourceType!: 'supplier' | 'borrow' | 'uncounted_old';
+
+  @ApiPropertyOptional({ example: 'Corner Pharmacy', nullable: true })
+  @Column({ name: 'source_name', type: 'varchar', length: 100, nullable: true })
+  sourceName!: string | null;
 
   @ApiPropertyOptional({
     example: 'popular-2026-10-04',

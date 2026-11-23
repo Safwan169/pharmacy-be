@@ -97,6 +97,14 @@ export class StockController {
     return this.receiptsService.findAll(query);
   }
 
+  @Get('receipts/borrow-stores')
+  @Roles('owner', 'cashier')
+  @ApiOperation({ summary: 'Previously used borrow-store names' })
+  @ApiOkResponse({ schema: { type: 'array', items: { type: 'string' } } })
+  borrowStores(): Promise<string[]> {
+    return this.receiptsService.findBorrowStoreNames();
+  }
+
   @Get('receipts/:id')
   @Roles('owner', 'cashier')
   @ApiOperation({ summary: 'One delivery with its lines' })

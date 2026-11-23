@@ -196,7 +196,8 @@ export class ReturnsService {
         refundTotalMinor += refundMinor;
 
         const baseQuantity = line.quantity * item.qtyInBase;
-        const restock = line.restock ?? true;
+        const restock =
+          (line.restock ?? true) && item.stockSource === 'tracked';
         if (restock) {
           await this.restock(manager, {
             variantId: item.productVariantId,

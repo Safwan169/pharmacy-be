@@ -58,6 +58,14 @@ export class ReceiptsService {
 
   async create(dto: CreateReceiptDto, userId: number): Promise<StockReceipt> {
     const today = todayInDhaka();
+    const sourceType = dto.source_type ?? 'supplier';
+    const sourceName = dto.source_name?.trim() || null;
+    if (sourceType === 'borrow' && sourceName === null) {
+      throw new BadRequestException('Name the store this medicine was borrowed from.');
+    }
+    if (sourceType !== 'borrow' && sourceName !== null) {
+      throw new BadRequestException('A source name is only allowed for borrowed stock.');
+    }
 
     const id = await this.dataSource.transaction(async (manager) => {
       const variants = await manager.find(ProductVariant, {
@@ -128,6 +136,8 @@ export class ReceiptsService {
           receiptNumber: await nextDocumentNumber(manager, DOCUMENT_PREFIX),
           supplierId: dto.supplier_id ?? null,
           supplierInvoiceNo: dto.supplier_invoice_no?.trim() || null,
+          sourceType,
+          sourceName,
           receivedAt: dto.received_at ?? today,
           totalCost: 0,
           note: dto.note?.trim() || null,
@@ -346,6 +356,17 @@ export class ReceiptsService {
       throw new NotFoundException(`Receipt ${id} not found`);
     }
     return receipt;
+  }
+
+  async findBorrowStoreNames(): Promise<string[]> {
+    const rows = await this.receiptsRepository
+      .createQueryBuilder('receipt')
+      .select('DISTINCT receipt.sourceName', 'name')
+      .where('receipt.sourceType = :sourceType', { sourceType: 'borrow' })
+      .andWhere('receipt.sourceName IS NOT NULL')
+      .orderBy('receipt.sourceName', 'ASC')
+      .getRawMany<{ name: string }>();
+    return rows.map((row) => row.name);
   }
 
   async movements(query: ListMovementsQueryDto): Promise<PaginatedDto<StockMovement>> {

@@ -21,6 +21,14 @@ import { Sale } from './sale.entity';
  */
 @Entity({ name: 'sale_items' })
 @Check('chk_sale_items_quantity', `"quantity" > 0`)
+@Check(
+  'chk_sale_items_stock_source',
+  `"stock_source" IN ('tracked', 'old_stock', 'borrowed')`,
+)
+@Check(
+  'chk_sale_items_source_store',
+  `("stock_source" = 'borrowed' AND "source_store_name" IS NOT NULL AND length(trim("source_store_name")) > 0) OR ("stock_source" <> 'borrowed' AND "source_store_name" IS NULL)`,
+)
 export class SaleItem {
   @ApiProperty({ example: 1 })
   @PrimaryGeneratedColumn()
@@ -92,6 +100,27 @@ export class SaleItem {
   })
   @Column({ name: 'base_qty_deducted', type: 'integer', default: 0 })
   baseQtyDeducted!: number;
+
+  @ApiProperty({
+    enum: ['tracked', 'old_stock', 'borrowed'],
+    description: 'Whether this line used tracked stock or an explicit stock override.',
+  })
+  @Column({
+    name: 'stock_source',
+    type: 'varchar',
+    length: 20,
+    default: 'tracked',
+  })
+  stockSource!: 'tracked' | 'old_stock' | 'borrowed';
+
+  @ApiPropertyOptional({ example: 'Corner Pharmacy', nullable: true })
+  @Column({
+    name: 'source_store_name',
+    type: 'varchar',
+    length: 100,
+    nullable: true,
+  })
+  sourceStoreName!: string | null;
 
   @ApiProperty({
     example: 50,

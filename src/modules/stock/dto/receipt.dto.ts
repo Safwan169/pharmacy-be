@@ -143,6 +143,24 @@ export class ReceiptLineDto {
 }
 
 export class CreateReceiptDto {
+  @ApiPropertyOptional({
+    enum: ['supplier', 'borrow', 'uncounted_old'],
+    default: 'supplier',
+  })
+  @IsIn(['supplier', 'borrow', 'uncounted_old'])
+  @IsOptional()
+  source_type?: 'supplier' | 'borrow' | 'uncounted_old';
+
+  @ApiPropertyOptional({
+    example: 'Corner Pharmacy',
+    maxLength: 100,
+    description: 'Required only when source_type is borrow.',
+  })
+  @IsString()
+  @MaxLength(100)
+  @IsOptional()
+  source_name?: string;
+
   @ApiPropertyOptional({ example: 2 })
   @Type(() => Number)
   @IsInt()

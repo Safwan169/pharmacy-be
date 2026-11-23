@@ -79,8 +79,8 @@ export class SalesService {
 
   /**
    * Direct POS checkout. All or nothing: if any line is unsellable, nothing is
-   * written and no stock moves. Stock is deducted with a conditional UPDATE so
-   * two simultaneous checkouts can never oversell the same variant.
+   * written. Tracked stock is deducted with a conditional UPDATE so two
+   * simultaneous checkouts can never oversell the same variant.
    */
   async checkout(dto: CheckoutDto, userId: number): Promise<Sale> {
     const duplicates = findDuplicateVariants(dto.items);
@@ -170,6 +170,18 @@ export class SalesService {
         }
         lineUnits.set(item.variant_id, unit);
         lineMinimumPrices.set(item.variant_id, variant.minimumPrice);
+        if (item.stock_source !== undefined) {
+          if (
+            item.stock_source === 'borrowed' &&
+            !item.source_store_name?.trim()
+          ) {
+            throw new BadRequestException(
+              'A borrowed stock line needs the name of the other store.',
+            );
+          }
+          lineBatches.set(item.variant_id, []);
+          continue;
+        }
         // Stock is what the unexpired batches hold, not the raw total.
         const allocation = await this.stockService.allocate(
           manager,
@@ -421,14 +433,21 @@ export class SalesService {
             manager.create(SaleItem, {
               saleId: sale.id,
               productVariantId: variant.id,
-              batchId: primary.batch.id,
+              batchId: primary?.batch.id ?? null,
               // Snapshots: a later catalogue edit must not rewrite this invoice.
               brandNameSnapshot: variant.product.brandName,
               dosageFormSnapshot: variant.dosageForm,
               strengthSnapshot: variant.strength,
               unitNameSnapshot: line.oldPrice ? `${line.unit.name} (old price)` : line.unit.name,
               qtyInBase: line.unit.qtyInBase,
-              baseQtyDeducted: line.quantity * line.unit.qtyInBase,
+              baseQtyDeducted: item.stock_source
+                ? 0
+                : line.quantity * line.unit.qtyInBase,
+              stockSource: item.stock_source ?? 'tracked',
+              sourceStoreName:
+                item.stock_source === 'borrowed'
+                  ? item.source_store_name?.trim() || null
+                  : null,
               unitPrice: line.unitPrice,
               quantity: line.quantity,
               lineTotal: totals.lineTotals[priced.indexOf(line)],

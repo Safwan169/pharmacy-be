@@ -14,6 +14,7 @@ import {
   Min,
   MinLength,
   Validate,
+  ValidateIf,
   ValidateNested,
   ValidationArguments,
   ValidatorConstraint,
@@ -48,6 +49,25 @@ export class CheckoutItemDto {
   @Max(100)
   @IsOptional()
   discount_percent?: number;
+
+  @ApiPropertyOptional({
+    enum: ['old_stock', 'borrowed'],
+    description: 'Sale source recorded; tracked stock is unchanged.',
+  })
+  @IsIn(['old_stock', 'borrowed'])
+  @IsOptional()
+  stock_source?: 'old_stock' | 'borrowed';
+
+  @ApiPropertyOptional({
+    example: 'Corner Pharmacy',
+    maxLength: 100,
+    description: 'Required when stock_source is borrowed.',
+  })
+  @ValidateIf((item: CheckoutItemDto) => item.stock_source === 'borrowed')
+  @IsString()
+  @MinLength(1)
+  @MaxLength(100)
+  source_store_name?: string;
 }
 
 /** A percentage discount is capped at 100; a flat one only has to be non-negative. */
