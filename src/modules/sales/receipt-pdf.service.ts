@@ -10,6 +10,8 @@ import { drawQr } from './qr';
 const MM = 72 / 25.4;
 const TAKA_SIGN = '৳';
 const ASCII_CURRENCY = 'Tk ';
+const RECEIPT_FONT_SIZE = 8;
+const RECEIPT_LINE_GAP = 0.35;
 
 /**
  * Narrow receipts for 58 mm / 80 mm thermal printers. One long page whose
@@ -36,23 +38,24 @@ export class ReceiptPdfService {
         this.kv(doc, 'Customer', `${sale.customer.name}${sale.customer.phone ? ` ${sale.customer.phone}` : ''}`, w);
       }
       if (sale.status === 'voided') {
-        doc.moveDown(0.3);
-        doc.fontSize(11).text('*** VOIDED ***', this.left(doc), doc.y, { align: 'center', width: w });
+        doc.moveDown(RECEIPT_LINE_GAP);
+        doc.fontSize(RECEIPT_FONT_SIZE).text('*** VOIDED ***', this.left(doc), doc.y, { align: 'center', width: w });
       }
       this.line(doc, w);
 
-      doc.fontSize(8);
+      doc.fontSize(RECEIPT_FONT_SIZE);
       for (const item of sale.items ?? []) {
         const { unit, marker } = splitUnitMarker(item.unitNameSnapshot);
         const name = [item.brandNameSnapshot, item.strengthSnapshot]
           .filter((p): p is string => !!p)
           .join(' ');
         doc.text(marker ? `${name} (${marker})` : name, this.left(doc), doc.y, { width: w });
-        const qty = `${item.quantity} ${unit} x ${formatAmount(item.unitPrice)}`;
+        doc.moveDown(RECEIPT_LINE_GAP);
+        const qty = `${item.quantity} ${unit} x ${formatReceiptAmount(item.unitPrice)}`;
         const y = doc.y;
         doc.text(qty, this.left(doc), y, { width: w * 0.62 });
         doc.text(this.money(item.lineTotal), this.left(doc) + w * 0.62, y, { width: w * 0.38, align: 'right' });
-        doc.moveDown(0.2);
+        doc.moveDown(RECEIPT_LINE_GAP);
       }
       this.line(doc, w);
 
@@ -60,9 +63,7 @@ export class ReceiptPdfService {
       if (sale.discountAmount > 0) {
         this.kv(doc, 'Discount', `-${this.money(sale.discountAmount)}`, w);
       }
-      doc.fontSize(11);
-      this.kv(doc, 'TOTAL', this.money(sale.totalAmount), w, true);
-      doc.fontSize(8);
+      this.kv(doc, 'TOTAL', this.money(sale.totalAmount), w);
       this.kv(doc, 'Paid at checkout', this.money(sale.paidAmount), w);
       this.kv(doc, 'Paid by', paymentLabel(sale.paymentMethod), w);
       if (sale.paymentMethod === 'cash' && sale.amountTendered !== null) {
@@ -88,16 +89,14 @@ export class ReceiptPdfService {
     const width = await this.settingsService.receiptWidthMm();
     return this.render(width, (doc, w) => {
       this.header(doc, settings, w);
-      doc.fontSize(10).text('PAYMENT RECEIPT', this.left(doc), doc.y, { align: 'center', width: w });
+      doc.fontSize(RECEIPT_FONT_SIZE).text('PAYMENT RECEIPT', this.left(doc), doc.y, { align: 'center', width: w });
       this.line(doc, w);
       this.kv(doc, 'Receipt', payment.receiptNumber, w);
       this.kv(doc, 'Date', formatDateTime(payment.createdAt), w);
       this.kv(doc, 'Customer', `${payment.customer.name}${payment.customer.phone ? ` ${payment.customer.phone}` : ''}`, w);
       this.kv(doc, 'Received by', payment.createdBy?.name || payment.createdBy?.email || '-', w);
       this.line(doc, w);
-      doc.fontSize(11);
-      this.kv(doc, 'PAID', this.money(payment.amount), w, true);
-      doc.fontSize(8);
+      this.kv(doc, 'PAID', this.money(payment.amount), w);
       this.kv(doc, 'By', paymentLabel(payment.method), w);
       if (payment.bkashTrxId) this.kv(doc, 'bKash TrxID', payment.bkashTrxId, w);
       this.kv(doc, 'Balance left', this.money(payment.balanceAfter), w);
@@ -147,12 +146,11 @@ export class ReceiptPdfService {
 
   private header(doc: PDFKit.PDFDocument, s: ShopSettings, w: number): void {
     const x = this.left(doc);
-    doc.fontSize(12).text(s.shop_name || 'Pharmacy', x, doc.y, { align: 'center', width: w });
-    doc.fontSize(7);
+    doc.fontSize(RECEIPT_FONT_SIZE).text(s.shop_name || 'Pharmacy', x, doc.y, { align: 'center', width: w });
     if (s.shop_address) doc.text(s.shop_address, x, doc.y, { align: 'center', width: w });
     if (s.shop_phone) doc.text(`Phone: ${s.shop_phone}`, x, doc.y, { align: 'center', width: w });
     if (s.drug_license_no) doc.text(`Drug Licence: ${s.drug_license_no}`, x, doc.y, { align: 'center', width: w });
-    doc.moveDown(0.3);
+    doc.moveDown(RECEIPT_LINE_GAP);
   }
 
   /**
@@ -171,16 +169,15 @@ export class ReceiptPdfService {
     drawQr(doc, invoiceNumber, this.left(doc) + (w - size) / 2, top, size);
     // Rectangles do not move the cursor, so put it back below the code.
     doc.y = top + size + 2;
-    doc.fontSize(6).text('Scan to return this bill', this.left(doc), doc.y, {
+    doc.fontSize(RECEIPT_FONT_SIZE).text('Scan to return this bill', this.left(doc), doc.y, {
       align: 'center',
       width: w,
     });
-    doc.fontSize(8);
   }
 
   private footer(doc: PDFKit.PDFDocument, s: ShopSettings, w: number): void {
     this.line(doc, w);
-    doc.fontSize(7);
+    doc.fontSize(RECEIPT_FONT_SIZE);
     if (s.receipt_footer) doc.text(s.receipt_footer, this.left(doc), doc.y, { align: 'center', width: w });
     doc.moveDown(0.5);
   }
@@ -189,12 +186,18 @@ export class ReceiptPdfService {
     return doc.page.margins.left;
   }
 
-  private kv(doc: PDFKit.PDFDocument, key: string, value: string, w: number, bold = false): void {
+  private kv(doc: PDFKit.PDFDocument, key: string, value: string, w: number): void {
     const y = doc.y;
     const x = this.left(doc);
-    doc.text(key, x, y, { width: w * 0.5 });
-    doc.text(value, x + w * 0.5, y, { width: w * 0.5, align: 'right' });
-    if (bold) doc.moveDown(0.2);
+    const columnWidth = w * 0.5;
+    doc.fontSize(RECEIPT_FONT_SIZE);
+    doc.text(key, x, y, { width: columnWidth });
+    doc.text(value, x + columnWidth, y, { width: columnWidth, align: 'right' });
+    const height = Math.max(
+      doc.heightOfString(key, { width: columnWidth }),
+      doc.heightOfString(value, { width: columnWidth }),
+    );
+    doc.y = y + height + RECEIPT_LINE_GAP * RECEIPT_FONT_SIZE;
   }
 
   private line(doc: PDFKit.PDFDocument, w: number): void {
@@ -208,7 +211,7 @@ export class ReceiptPdfService {
 
   private money(amount: number): string {
     const prefix = this.customFont === null ? ASCII_CURRENCY : TAKA_SIGN;
-    return `${prefix}${formatAmount(amount)}`;
+    return `${prefix}${formatReceiptAmount(amount)}`;
   }
 
   private loadCustomFont(): Buffer | null {
@@ -238,6 +241,10 @@ function paymentLabel(method: string): string {
     default:
       return 'Cash';
   }
+}
+
+function formatReceiptAmount(amount: number): string {
+  return formatAmount(amount).replace(/\.00$/, '');
 }
 
 function formatDateTime(date: Date): string {
