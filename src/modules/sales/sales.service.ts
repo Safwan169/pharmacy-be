@@ -22,7 +22,7 @@ import { ListSalesQueryDto } from './dto/list-sales-query.dto';
 import { SaleItem } from './entities/sale-item.entity';
 import { Sale } from './entities/sale.entity';
 
-import { fromMinorUnits, toMinorUnits } from '../../common/money';
+import { fromMinorUnits, toMinorUnits, toWholeTakaMinor } from '../../common/money';
 
 /** A basket item after pricing — possibly one of two halves of a split line. */
 interface PricedSaleLine {
@@ -33,6 +33,28 @@ interface PricedSaleLine {
   allocations: BatchAllocation[];
   /** True for the half sold from older batches at the price they carried. */
   oldPrice: boolean;
+  discountMinor?: number;
+}
+
+/** Split a bill-level flat discount in cents, with rounding remainder preserved. */
+function allocateProportionally(totalMinor: number, weights: number[]): number[] {
+  const sum = weights.reduce((total, weight) => total + weight, 0);
+  if (sum <= 0 || totalMinor <= 0) return weights.map(() => 0);
+  const exact = weights.map((weight) => (totalMinor * weight) / sum);
+  const shares = exact.map(Math.floor);
+  let remainder = totalMinor - shares.reduce((total, share) => total + share, 0);
+  const order = exact.map((value, index) => ({ index, remainder: value - shares[index] }))
+    .sort((a, b) => b.remainder - a.remainder);
+  for (let i = 0; i < remainder; i += 1) shares[order[i % order.length].index] += 1;
+  return shares;
+}
+
+function wholeTakaDiscount(amountMinor: number): number {
+  return Math.round(amountMinor / 100) * 100;
+}
+
+function wholeTakaCapacity(amountMinor: number): number {
+  return Math.floor(amountMinor / 100) * 100;
 }
 
 function normalisePhone(phone: string | undefined | null): string | null {
@@ -87,6 +109,7 @@ export class SalesService {
       const variantsById = new Map(variants.map((v) => [v.id, v]));
       // Resolved per line: the unit sold and how many base units that moves.
       const lineUnits = new Map<number, VariantUnit>();
+      const lineMinimumPrices = new Map<number, number | null>();
       // Which batches each line draws from, soonest expiry first.
       const lineBatches = new Map<number, BatchAllocation[]>();
 
@@ -146,6 +169,7 @@ export class SalesService {
           continue;
         }
         lineUnits.set(item.variant_id, unit);
+        lineMinimumPrices.set(item.variant_id, variant.minimumPrice);
         // Stock is what the unexpired batches hold, not the raw total.
         const allocation = await this.stockService.allocate(
           manager,
@@ -217,10 +241,57 @@ export class SalesService {
         });
       }
 
-      const totals = computeCheckoutTotals(
-        priced.map((line) => ({ unitPrice: line.unitPrice, quantity: line.quantity })),
-        dto.discount,
+      const itemDiscountMode = dto.items.some((item) => (item.discount_percent ?? 0) > 0);
+      if (itemDiscountMode && dto.discount !== undefined) {
+        throw new BadRequestException('Use either product discounts or one whole-sale discount, not both.');
+      }
+      const lineSubtotalsMinor = priced.map((line) => toMinorUnits(line.unitPrice) * line.quantity);
+      const subtotalMinor = lineSubtotalsMinor.reduce((total, value) => total + value, 0);
+      const globalDiscountMinorRaw = dto.discount === undefined
+        ? 0
+        : toMinorUnits(computeCheckoutTotals(
+            priced.map((line) => ({ unitPrice: line.unitPrice, quantity: line.quantity })),
+            dto.discount,
+          ).discountAmount);
+      const globalDiscountMinor = wholeTakaDiscount(globalDiscountMinorRaw);
+      const globalShares = allocateProportionally(globalDiscountMinor / 100, lineSubtotalsMinor)
+        .map((taka) => taka * 100);
+      const floorFailures: CheckoutItemFailureDto[] = [];
+      priced.forEach((line, index) => {
+        const floor = lineMinimumPrices.get(line.item.variant_id);
+        const lineMinor = lineSubtotalsMinor[index];
+        const floorMinor = floor === null || floor === undefined
+          ? 0
+          : toMinorUnits(floor * line.unit.qtyInBase) * line.quantity;
+        const exactCapacity = Math.max(0, lineMinor - floorMinor);
+        const capacity = wholeTakaCapacity(exactCapacity);
+        const requestedRate = dto.items.find((item) => item.variant_id === line.item.variant_id)?.discount_percent ?? 0;
+        const maxRate = lineMinor <= 0 ? 0 : (exactCapacity * 100) / lineMinor;
+        const lineDiscountMinor = itemDiscountMode
+          ? Math.min(wholeTakaDiscount(Math.round((lineMinor * requestedRate) / 100)), capacity)
+          : Math.min(globalShares[index], capacity);
+        line.discountMinor = lineDiscountMinor;
+        if (lineMinor < floorMinor || (itemDiscountMode && requestedRate > maxRate + 0.000001) || lineDiscountMinor > capacity) {
+          floorFailures.push({
+            variant_id: line.item.variant_id,
+            unit_id: line.unit.id,
+            reason: 'minimum_price',
+            message: 'The discount would take this item below its minimum selling price.',
+            requested_quantity: line.quantity,
+          });
+        }
+      });
+      if (floorFailures.length > 0) throw rejectCheckout(floorFailures);
+      const discountMinor = Math.min(
+        priced.reduce((total, line) => total + (line.discountMinor ?? 0), 0),
+        subtotalMinor,
       );
+      const totals = {
+        lineTotals: lineSubtotalsMinor.map(fromMinorUnits),
+        subtotal: fromMinorUnits(subtotalMinor),
+        discountAmount: fromMinorUnits(discountMinor),
+        totalAmount: fromMinorUnits(subtotalMinor - discountMinor),
+      };
 
       // How the money is settled. Cash may record what was handed over so the
       // receipt can show the change; due books the whole total to the customer.
@@ -231,8 +302,14 @@ export class SalesService {
       let paidMinor = totalMinor;
       let dueMinor = 0;
 
-      if (dto.payment_method === 'cash' && dto.amount_tendered !== undefined) {
-        const tenderedMinor = toMinorUnits(dto.amount_tendered);
+      if (dto.payment_method === 'cash') {
+        if (dto.amount_tendered === undefined) {
+          throw new BadRequestException({
+            message: 'Cash payment requires the amount handed over.',
+            reason: 'cash_tender_required',
+          });
+        }
+        const tenderedMinor = toWholeTakaMinor(toMinorUnits(dto.amount_tendered));
         if (tenderedMinor < totalMinor) {
           throw new BadRequestException({
             message: 'The cash handed over is less than the total.',
@@ -253,8 +330,8 @@ export class SalesService {
         manager.create(Sale, {
           invoiceNumber: await this.nextInvoiceNumber(manager),
           subtotal: totals.subtotal,
-          discountType: dto.discount?.type ?? null,
-          discountValue: dto.discount?.value ?? null,
+          discountType: itemDiscountMode ? null : dto.discount?.type ?? null,
+          discountValue: itemDiscountMode ? null : dto.discount?.value ?? null,
           discountAmount: totals.discountAmount,
           totalAmount: totals.totalAmount,
           paymentMethod: dto.payment_method,
@@ -277,7 +354,7 @@ export class SalesService {
       // as paying it off tomorrow: the drawer, the day's takings and the
       // customer's ledger all already know how to read them.
       if (customerId !== null && dto.paid_now !== undefined) {
-        const nowMinor = toMinorUnits(dto.paid_now);
+        const nowMinor = toWholeTakaMinor(toMinorUnits(dto.paid_now));
         if (nowMinor > totalMinor) {
           throw new BadRequestException({
             message: 'That is more than this bill. Enter the bill amount or less.',
@@ -293,7 +370,7 @@ export class SalesService {
         }
         await applyDuePayment(manager, {
           customerId,
-          amount: dto.paid_now,
+          amount: fromMinorUnits(nowMinor),
           method: dto.paid_now_method ?? 'cash',
           bkashTrxId: dto.paid_now_method === 'bkash' ? dto.bkash_trx_id : null,
           saleId: sale.id,
@@ -355,6 +432,7 @@ export class SalesService {
               unitPrice: line.unitPrice,
               quantity: line.quantity,
               lineTotal: totals.lineTotals[priced.indexOf(line)],
+              discountAmount: fromMinorUnits(line.discountMinor ?? 0),
             }),
           );
         }

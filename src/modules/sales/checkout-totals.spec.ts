@@ -56,7 +56,7 @@ describe('computeCheckoutTotals', () => {
     expect(totals.totalAmount).toBe(99.5);
   });
 
-  it('keeps cent-level precision instead of drifting into float error', () => {
+  it('keeps exact cent-level totals', () => {
     // 33.33 * 3 = 99.99; a naive float 15% would give 14.998499999999998.
     const totals = computeCheckoutTotals([{ unitPrice: 33.33, quantity: 3 }], {
       type: 'percentage',

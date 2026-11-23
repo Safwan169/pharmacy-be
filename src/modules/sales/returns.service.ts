@@ -165,6 +165,8 @@ export class ReturnsService {
 
       const subtotalMinor = toMinorUnits(sale.subtotal);
       const discountMinor = toMinorUnits(sale.discountAmount);
+      const itemDiscountsMinor = items.reduce((total, item) => total + toMinorUnits(item.discountAmount), 0);
+      const hasStoredLineDiscounts = itemDiscountsMinor === discountMinor;
 
       const saleReturn = await manager.save(
         manager.create(SaleReturn, {
@@ -182,8 +184,9 @@ export class ReturnsService {
         const item = byId.get(line.sale_item_id)!;
         const lineMinor = toMinorUnits(item.lineTotal);
         // This line's slice of the discount, then per unit, then × returned.
-        const lineDiscountMinor =
-          subtotalMinor === 0
+        const lineDiscountMinor = hasStoredLineDiscounts
+          ? toMinorUnits(item.discountAmount)
+          : subtotalMinor === 0
             ? 0
             : Math.round((discountMinor * lineMinor) / subtotalMinor);
         const paidForLineMinor = lineMinor - lineDiscountMinor;

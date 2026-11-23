@@ -40,6 +40,14 @@ export class CheckoutItemDto {
   @IsInt()
   @Min(1)
   quantity!: number;
+
+  @ApiPropertyOptional({ example: 5, minimum: 0, maximum: 100, description: 'Optional percentage discount for this product line. Cannot go below the product minimum price.' })
+  @Type(() => Number)
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0)
+  @Max(100)
+  @IsOptional()
+  discount_percent?: number;
 }
 
 /** A percentage discount is capped at 100; a flat one only has to be non-negative. */

@@ -152,6 +152,10 @@ export class ProductVariant {
   @Column({ type: 'numeric', precision: 10, scale: 2, nullable: true, transformer: numericTransformer })
   mrp!: number | null;
 
+  @ApiPropertyOptional({ example: 7.5, nullable: true, description: 'Lowest allowed selling price per base unit.' })
+  @Column({ name: 'minimum_price', type: 'numeric', precision: 10, scale: 2, nullable: true, transformer: numericTransformer })
+  minimumPrice!: number | null;
+
   @ApiPropertyOptional({
     example: 241.8,
     nullable: true,

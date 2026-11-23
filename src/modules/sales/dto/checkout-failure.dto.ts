@@ -4,6 +4,7 @@ export const CHECKOUT_FAILURE_REASONS = [
   'not_found',
   'inactive',
   'not_priced',
+  'minimum_price',
   'unit_not_found',
   'unit_not_sellable',
   'insufficient_stock',

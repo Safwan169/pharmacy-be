@@ -42,7 +42,7 @@ export function computeCheckoutTotals(
         ? Math.round((subtotalMinor * discount.value) / 100)
         : toMinorUnits(discount.value);
   }
-  // Never below zero, never more than the subtotal.
+  // Never below zero or more than the subtotal.
   discountMinor = Math.max(0, Math.min(discountMinor, subtotalMinor));
 
   return {

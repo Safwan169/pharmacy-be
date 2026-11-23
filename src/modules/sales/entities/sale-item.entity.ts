@@ -123,4 +123,8 @@ export class SaleItem {
     transformer: numericTransformer,
   })
   lineTotal!: number;
+
+  @ApiProperty({ example: 2.5, description: 'Discount applied to this line. The invoice shows the sale discount as one total.' })
+  @Column({ name: 'discount_amount', type: 'numeric', precision: 10, scale: 2, default: 0, transformer: numericTransformer })
+  discountAmount!: number;
 }

@@ -11,6 +11,11 @@ export function fromMinorUnits(minorUnits: number): number {
   return Math.round(minorUnits) / 100;
 }
 
+/** Round a stored money amount to the nearest whole Taka. */
+export function toWholeTakaMinor(minorUnits: number): number {
+  return Math.round(minorUnits / 100) * 100;
+}
+
 /** Fixed 2-decimal rendering for invoices and API responses. */
 export function formatAmount(amount: number): string {
   return amount.toFixed(2);

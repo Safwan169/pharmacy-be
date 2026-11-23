@@ -58,15 +58,12 @@ export class ReceiptPdfService {
 
       this.kv(doc, 'Subtotal', this.money(sale.subtotal), w);
       if (sale.discountAmount > 0) {
-        const label =
-          sale.discountType === 'percentage'
-            ? `Discount ${formatAmount(sale.discountValue ?? 0)}%`
-            : 'Discount';
-        this.kv(doc, label, `-${this.money(sale.discountAmount)}`, w);
+        this.kv(doc, 'Discount', `-${this.money(sale.discountAmount)}`, w);
       }
       doc.fontSize(11);
       this.kv(doc, 'TOTAL', this.money(sale.totalAmount), w, true);
       doc.fontSize(8);
+      this.kv(doc, 'Paid at checkout', this.money(sale.paidAmount), w);
       this.kv(doc, 'Paid by', paymentLabel(sale.paymentMethod), w);
       if (sale.paymentMethod === 'cash' && sale.amountTendered !== null) {
         this.kv(doc, 'Tendered', this.money(sale.amountTendered), w);

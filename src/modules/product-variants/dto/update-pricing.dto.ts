@@ -122,6 +122,15 @@ export class UpdatePricingDto {
   @IsOptional()
   mrp?: number | null;
 
+  @ApiPropertyOptional({ example: 7.5, nullable: true, minimum: 0, description: 'Lowest allowed selling price per base unit. Send null to remove the limit.' })
+  @ValidateIf((_, value) => value !== null)
+  @Type(() => Number)
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0)
+  @Max(MAX_PRICE)
+  @IsOptional()
+  minimum_price?: number | null;
+
   @ApiPropertyOptional({
     example: 50,
     nullable: true,

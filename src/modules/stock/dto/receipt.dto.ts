@@ -15,6 +15,7 @@ import {
   Max,
   MaxLength,
   Min,
+  ValidateIf,
   ValidateNested,
 } from 'class-validator';
 import { PaginationQueryDto } from '../../../common/dto/pagination-query.dto';
@@ -119,6 +120,15 @@ export class ReceiptLineDto {
   @Max(99_999_999.99)
   @IsOptional()
   new_mrp?: number;
+
+  @ApiPropertyOptional({ example: 7.5, nullable: true, minimum: 0, description: 'Lowest allowed selling price per base unit. Send null to remove the limit.' })
+  @ValidateIf((_, value) => value !== null)
+  @Type(() => Number)
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0)
+  @Max(99_999_999.99)
+  @IsOptional()
+  minimum_price?: number | null;
 
   @ApiPropertyOptional({
     enum: ['now', 'after_old_stock'],

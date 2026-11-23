@@ -421,10 +421,11 @@ export class ProductVariantsService {
       dto.stock_quantity === undefined &&
       dto.units === undefined &&
       dto.reorder_level === undefined &&
-      dto.mrp === undefined
+      dto.mrp === undefined &&
+      dto.minimum_price === undefined
     ) {
       throw new BadRequestException(
-        'Send at least one of price, stock_quantity, units, reorder_level or mrp.',
+        'Send at least one of price, stock_quantity, units, reorder_level, mrp or minimum_price.',
       );
     }
     if (dto.units !== undefined) {
@@ -461,6 +462,9 @@ export class ProductVariantsService {
       if (dto.mrp !== undefined) {
         patch.mrp = dto.mrp;
       }
+      if (dto.minimum_price !== undefined) {
+        patch.minimumPrice = dto.minimum_price;
+      }
       if (priceTouched) {
         const units = await manager.find(VariantUnit, {
           where: { variantId: id },
@@ -474,6 +478,22 @@ export class ProductVariantsService {
       }
       if (Object.keys(patch).length > 0) {
         await manager.update(ProductVariant, { id }, patch);
+      }
+      if (dto.minimum_price !== undefined || dto.mrp !== undefined || priceTouched) {
+        const floor = dto.minimum_price !== undefined ? dto.minimum_price : variant.minimumPrice;
+        const printedMrp = dto.mrp !== undefined ? dto.mrp : variant.mrp;
+        if (floor !== null && floor !== undefined) {
+          if (printedMrp !== null && printedMrp !== undefined && floor > printedMrp) {
+            throw new BadRequestException('minimum_price cannot be greater than MRP.');
+          }
+          const currentUnits = await manager.find(VariantUnit, { where: { variantId: id } });
+          const belowFloor = currentUnits.find(
+            (unit) => unit.isSellable && unit.price !== null && unit.price + 0.001 < floor * unit.qtyInBase,
+          );
+          if (belowFloor) {
+            throw new BadRequestException(`minimum_price cannot be greater than the selling price for ${belowFloor.name}.`);
+          }
+        }
       }
       if (priceTouched) {
         const after = await manager.find(VariantUnit, {
@@ -506,6 +526,18 @@ export class ProductVariantsService {
             entityType: 'variant',
             entityId: id,
             summary: `${label}: printed MRP ${variant.mrp?.toFixed(2) ?? '—'} → ${dto.mrp?.toFixed(2) ?? '—'}`,
+          },
+          manager,
+        );
+      }
+      if (dto.minimum_price !== undefined && dto.minimum_price !== variant.minimumPrice) {
+        await this.auditService.record(
+          {
+            userId,
+            action: 'minimum_price.update',
+            entityType: 'variant',
+            entityId: id,
+            summary: `${label}: minimum selling price ${variant.minimumPrice?.toFixed(2) ?? '—'} → ${dto.minimum_price?.toFixed(2) ?? '—'}`,
           },
           manager,
         );

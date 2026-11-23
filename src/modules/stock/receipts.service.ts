@@ -12,6 +12,7 @@ import { fromMinorUnits, toMinorUnits } from '../../common/money';
 import { AuditService } from '../audit/audit.service';
 import { PendingPriceService } from '../pricing/pending-price.service';
 import { ProductVariant } from '../product-variants/entities/product-variant.entity';
+import { VariantUnit } from '../product-variants/entities/variant-unit.entity';
 import {
   CreateReceiptDto,
   ListMovementsQueryDto,
@@ -206,6 +207,40 @@ export class ReceiptsService {
               `set at delivery ${receipt.receiptNumber}`,
             );
           }
+        }
+
+        const nextMinimumPrice = line.minimum_price !== undefined ? line.minimum_price : variant.minimumPrice;
+        const nextMrp = line.new_mrp !== undefined ? line.new_mrp : variant.mrp;
+        if (nextMinimumPrice !== null && nextMinimumPrice !== undefined) {
+          if (nextMrp !== null && nextMrp !== undefined && nextMinimumPrice > nextMrp) {
+            throw new BadRequestException('Minimum selling price cannot be greater than MRP.');
+          }
+          const currentUnits = await manager.find(VariantUnit, { where: { variantId: variant.id } });
+          const belowCurrentFloor = currentUnits.find((unit) => {
+            if (!unit.isSellable || unit.price === null) return false;
+            const beingRepricedNow = line.price_when !== 'after_old_stock' &&
+              line.sell_prices?.some((price) => price.unit_name === unit.name);
+            return !beingRepricedNow && unit.price + 0.001 < nextMinimumPrice * unit.qtyInBase;
+          });
+          const belowProposedFloor = line.sell_prices?.find(
+            (price) => price.price + 0.001 < nextMinimumPrice * price.qty_in_base,
+          );
+          if (belowCurrentFloor || belowProposedFloor) {
+            throw new BadRequestException('Minimum selling price cannot be greater than a selling price.');
+          }
+        }
+        if (line.minimum_price !== undefined && line.minimum_price !== variant.minimumPrice) {
+          await manager.update(ProductVariant, { id: variant.id }, { minimumPrice: line.minimum_price });
+          await this.auditService.record(
+            {
+              userId,
+              action: 'minimum_price.update',
+              entityType: 'variant',
+              entityId: variant.id,
+              summary: `${variant.product?.brandName ?? `#${variant.id}`}${variant.strength ? ` ${variant.strength}` : ''}: minimum selling price ${variant.minimumPrice?.toFixed(2) ?? '—'} → ${line.minimum_price?.toFixed(2) ?? '—'} (delivery ${receipt.receiptNumber})`,
+            },
+            manager,
+          );
         }
       }
 
