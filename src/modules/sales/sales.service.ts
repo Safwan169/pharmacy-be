@@ -14,6 +14,7 @@ import { Customer } from '../customers/entities/customer.entity';
 import { ProductVariant } from '../product-variants/entities/product-variant.entity';
 import { VariantUnit } from '../product-variants/entities/variant-unit.entity';
 import { PendingPriceService } from '../pricing/pending-price.service';
+import { SettingsService } from '../settings/settings.service';
 import { BatchAllocation, StockService } from '../stock/stock.service';
 import { computeCheckoutTotals, formatInvoiceNumber } from './checkout-totals';
 import { CheckoutItemFailureDto } from './dto/checkout-failure.dto';
@@ -75,6 +76,7 @@ export class SalesService {
     @InjectRepository(Sale) private readonly salesRepository: Repository<Sale>,
     private readonly stockService: StockService,
     private readonly pendingPrices: PendingPriceService,
+    private readonly settingsService: SettingsService,
   ) {}
 
   /**
@@ -98,6 +100,31 @@ export class SalesService {
       throw new BadRequestException({
         message: 'A due sale needs a customer: send customer_id or customer { name, phone }.',
         reason: 'customer_required',
+      });
+    }
+    let bankName: string | null = null;
+    if (dto.payment_method === 'bank') {
+      const requestedBank = dto.bank_name?.trim();
+      if (!requestedBank) {
+        throw new BadRequestException({
+          message: 'Choose a bank for this payment.',
+          reason: 'bank_required',
+        });
+      }
+      bankName =
+        (await this.settingsService.bankNames()).find(
+          (name) => name.toLocaleLowerCase() === requestedBank.toLocaleLowerCase(),
+        ) ?? null;
+      if (bankName === null) {
+        throw new BadRequestException({
+          message: 'That bank is not configured in settings.',
+          reason: 'bank_not_configured',
+        });
+      }
+    } else if (dto.bank_name !== undefined) {
+      throw new BadRequestException({
+        message: 'A bank name is only allowed with a bank payment.',
+        reason: 'bank_not_allowed',
       });
     }
 
@@ -352,6 +379,7 @@ export class SalesService {
           changeGiven,
           bkashTrxId:
             dto.payment_method === 'bkash' ? dto.bkash_trx_id?.trim() || null : null,
+          bankName,
           paidAmount: fromMinorUnits(paidMinor),
           dueAmount: fromMinorUnits(dueMinor),
           createdById: userId,

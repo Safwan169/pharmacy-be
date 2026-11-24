@@ -28,8 +28,8 @@ export type SaleStatus = (typeof SALE_STATUSES)[number];
 export const DISCOUNT_TYPES = ['flat', 'percentage'] as const;
 export type DiscountType = (typeof DISCOUNT_TYPES)[number];
 
-/** Cash in hand, bKash transfer, or "due" — the customer pays later. */
-export const PAYMENT_METHODS = ['cash', 'bkash', 'due'] as const;
+/** Cash in hand, bKash, bank transfer, or "due" — the customer pays later. */
+export const PAYMENT_METHODS = ['cash', 'bkash', 'bank', 'due'] as const;
 export type PaymentMethod = (typeof PAYMENT_METHODS)[number];
 
 @Entity({ name: 'sales' })
@@ -39,7 +39,11 @@ export type PaymentMethod = (typeof PAYMENT_METHODS)[number];
   'chk_sales_status',
   `"status" IN ('completed', 'voided', 'returned', 'partial_return')`,
 )
-@Check('chk_sales_payment_method', `"payment_method" IN ('cash', 'bkash', 'due')`)
+@Check('chk_sales_payment_method', `"payment_method" IN ('cash', 'bkash', 'bank', 'due')`)
+@Check(
+  'chk_sales_bank_name',
+  `("payment_method" = 'bank' AND "bank_name" IS NOT NULL AND length(trim("bank_name")) > 0) OR ("payment_method" <> 'bank' AND "bank_name" IS NULL)`,
+)
 export class Sale {
   @ApiProperty({ example: 42 })
   @PrimaryGeneratedColumn()
@@ -161,6 +165,10 @@ export class Sale {
   @ApiPropertyOptional({ example: 'BKD7X1A2', nullable: true })
   @Column({ name: 'bkash_trx_id', type: 'varchar', length: 30, nullable: true })
   bkashTrxId!: string | null;
+
+  @ApiPropertyOptional({ example: 'Dutch-Bangla Bank', nullable: true })
+  @Column({ name: 'bank_name', type: 'varchar', length: 100, nullable: true })
+  bankName!: string | null;
 
   @ApiProperty({ example: 270, description: 'Money received so far on this sale.' })
   @Column({

@@ -70,6 +70,7 @@ export class ReportsService {
          COALESCE(SUM(s.discount_amount) FILTER (WHERE s.status <> 'voided'), 0)       AS discounts,
          COALESCE(SUM(s.total_amount) FILTER (WHERE s.status <> 'voided' AND s.payment_method = 'cash'), 0)  AS cash,
          COALESCE(SUM(s.total_amount) FILTER (WHERE s.status <> 'voided' AND s.payment_method = 'bkash'), 0) AS bkash,
+         COALESCE(SUM(s.total_amount) FILTER (WHERE s.status <> 'voided' AND s.payment_method = 'bank'), 0)  AS bank,
          COALESCE(SUM(s.total_amount) FILTER (WHERE s.status <> 'voided' AND s.payment_method = 'due'), 0)   AS due,
          COUNT(*) FILTER (WHERE s.status = 'voided')                                   AS voided_count
        FROM sales s
@@ -153,7 +154,7 @@ export class ReportsService {
       discounts: n(totals.discounts),
       refunds: refundTotal,
       net_sales: round2(gross - refundTotal),
-      by_method: { cash: n(totals.cash), bkash: n(totals.bkash), due: n(totals.due) },
+      by_method: { cash: n(totals.cash), bkash: n(totals.bkash), bank: n(totals.bank), due: n(totals.due) },
       refunds_by_method: { cash: n(refunds.cash), bkash: n(refunds.bkash), due_adjust: n(refunds.due_adjust) },
       due_collected: { cash: n(collected.cash), bkash: n(collected.bkash) },
       supplier_paid: {

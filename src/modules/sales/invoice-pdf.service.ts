@@ -227,7 +227,10 @@ export class InvoicePdfService {
   private drawFooter(doc: PDFKit.PDFDocument, sale: Sale): void {
     doc.moveDown(1.5);
     doc.fontSize(10);
-    doc.text(`Payment method: ${sale.paymentMethod}`, COLUMNS.item);
+    doc.text(
+      `Payment method: ${sale.paymentMethod === 'bank' && sale.bankName ? `Bank — ${sale.bankName}` : sale.paymentMethod}`,
+      COLUMNS.item,
+    );
     if (sale.paymentMethod === 'due') {
       doc.text(`Due on this invoice: ${this.money(sale.dueAmount)}`);
     }

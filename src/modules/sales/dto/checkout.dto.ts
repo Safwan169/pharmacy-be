@@ -183,6 +183,12 @@ export class CheckoutDto {
   @IsOptional()
   bkash_trx_id?: string;
 
+  @ApiPropertyOptional({ example: 'Dutch-Bangla Bank', maxLength: 100, description: 'Required for bank payments; must be configured in settings.' })
+  @IsString()
+  @MaxLength(100)
+  @IsOptional()
+  bank_name?: string;
+
   @ApiPropertyOptional({ example: 3, description: 'Due only: an existing customer.' })
   @Type(() => Number)
   @IsInt()

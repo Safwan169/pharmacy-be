@@ -65,7 +65,14 @@ export class ReceiptPdfService {
       }
       this.kv(doc, 'TOTAL', this.money(sale.totalAmount), w);
       this.kv(doc, 'Paid at checkout', this.money(sale.paidAmount), w);
-      this.kv(doc, 'Paid by', paymentLabel(sale.paymentMethod), w);
+      this.kv(
+        doc,
+        'Paid by',
+        sale.paymentMethod === 'bank' && sale.bankName
+          ? `Bank · ${sale.bankName}`
+          : paymentLabel(sale.paymentMethod),
+        w,
+      );
       if (sale.paymentMethod === 'cash' && sale.amountTendered !== null) {
         this.kv(doc, 'Tendered', this.money(sale.amountTendered), w);
         this.kv(doc, 'Change', this.money(sale.changeGiven ?? 0), w);

@@ -35,6 +35,7 @@ export class ProfitQueryDto {
 export class MethodBreakdownDto {
   @ApiProperty({ example: 12000 }) cash!: number;
   @ApiProperty({ example: 3500 }) bkash!: number;
+  @ApiProperty({ example: 2400 }) bank!: number;
   @ApiProperty({ example: 800 }) due!: number;
 }
 
@@ -102,7 +103,7 @@ export class DailyClosingDto {
       'cashier-scoped view.',
   })
   closing!: DayClosingSummaryDto | null;
-  @ApiProperty({ description: 'opening_cash + cash sales + cash due collections - cash refunds - cash paid to suppliers out of the drawer.' }) cash_in_drawer_expected!: number;
+  @ApiProperty({ description: 'opening_cash + cash sales + cash due collections - cash refunds - cash paid to suppliers out of the drawer. Bank payments are excluded.' }) cash_in_drawer_expected!: number;
   @ApiProperty() voided_count!: number;
   @ApiProperty({ type: ClosingTopItemDto, isArray: true }) top_items!: ClosingTopItemDto[];
   @ApiProperty({ type: ClosingCashierDto, isArray: true }) cashier_breakdown!: ClosingCashierDto[];

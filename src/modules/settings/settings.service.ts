@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { AuditService } from '../audit/audit.service';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -15,6 +15,7 @@ export const SETTING_KEYS = [
   'receipt_width_mm',
   'default_markup_percent',
   'opening_cash',
+  'bank_names',
 ] as const;
 export type SettingKey = (typeof SETTING_KEYS)[number];
 export type ShopSettings = Record<SettingKey, string>;
@@ -29,11 +30,12 @@ const DEFAULTS: ShopSettings = {
   receipt_width_mm: '80',
   default_markup_percent: '',
   opening_cash: '',
+  bank_names: '[]',
 };
 
 /**
  * Shop identity and knobs. Read on every receipt, so the whole table is
- * cached in memory and refreshed on write — it's seven rows.
+ * cached in memory and refreshed on write.
  */
 @Injectable()
 export class SettingsService {
@@ -62,12 +64,16 @@ export class SettingsService {
   async update(patch: Partial<ShopSettings>, actingUserId: number | null = null): Promise<ShopSettings> {
     const before = await this.getAll();
     const changed: (keyof ShopSettings)[] = [];
+    const bankNames = patch.bank_names === undefined
+      ? undefined
+      : normalizeBankNames(patch.bank_names);
     for (const key of SETTING_KEYS) {
       const value = patch[key];
       if (value === undefined) continue;
-      if (value.trim() !== before[key]) changed.push(key);
+      const normalized = key === 'bank_names' ? bankNames ?? '[]' : value.trim();
+      if (normalized !== before[key]) changed.push(key);
       await this.settingsRepository.save(
-        this.settingsRepository.create({ key, value: value.trim() }),
+        this.settingsRepository.create({ key, value: normalized }),
       );
     }
     this.cache = null;
@@ -94,4 +100,28 @@ export class SettingsService {
   async receiptWidthMm(): Promise<58 | 80> {
     return (await this.getAll()).receipt_width_mm === '58' ? 58 : 80;
   }
+
+  async bankNames(): Promise<string[]> {
+    return JSON.parse((await this.getAll()).bank_names) as string[];
+  }
+}
+
+function normalizeBankNames(raw: string): string {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    throw new BadRequestException('Bank names must be a JSON list of names.');
+  }
+  if (!Array.isArray(parsed) || parsed.some((value) => typeof value !== 'string')) {
+    throw new BadRequestException('Bank names must be a JSON list of names.');
+  }
+  const names = (parsed as string[])
+    .map((name) => name.trim())
+    .filter(Boolean);
+  if (names.some((name) => name.length > 100) || names.length > 20) {
+    throw new BadRequestException('Add up to 20 bank names, each 100 characters or fewer.');
+  }
+  const unique = new Map(names.map((name) => [name.toLocaleLowerCase(), name]));
+  return JSON.stringify([...unique.values()]);
 }

@@ -33,6 +33,9 @@ export class SettingsDto {
       'balance the first day opens from; ignored once any night has been counted.',
   })
   opening_cash!: string;
+
+  @ApiProperty({ example: '["Dutch-Bangla Bank","Islami Bank"]' })
+  bank_names!: string;
 }
 
 export class UpdateSettingsDto {
@@ -85,4 +88,10 @@ export class UpdateSettingsDto {
   @Matches(/^(\d{1,8}(\.\d{1,2})?)?$/, { message: 'opening_cash must be an amount or empty' })
   @IsOptional()
   opening_cash?: string;
+
+  @ApiPropertyOptional({ maxLength: 2000, description: 'JSON list of bank names configured for POS payments.' })
+  @IsString()
+  @MaxLength(2000)
+  @IsOptional()
+  bank_names?: string;
 }

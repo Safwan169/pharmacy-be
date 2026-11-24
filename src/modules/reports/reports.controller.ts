@@ -81,6 +81,7 @@ export class ReportsController {
         { item: 'Net sales', value: report.net_sales },
         { item: 'Cash sales', value: report.by_method.cash },
         { item: 'bKash sales', value: report.by_method.bkash },
+        { item: 'Bank sales', value: report.by_method.bank },
         { item: 'Due sales', value: report.by_method.due },
         { item: 'Due collected (cash)', value: report.due_collected.cash },
         { item: 'Due collected (bKash)', value: report.due_collected.bkash },
